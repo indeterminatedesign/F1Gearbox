@@ -72,7 +72,7 @@ unsigned long previousMicros = 0;
 bool engineRunning = true;
 
 const int rpmDebounceInterval = 100;
-const int startingShiftSpeed = 300;
+const int startingShiftSpeed = 400;
 const long rpmUpdateInterval = 100000;
 unsigned long rpmUpdatePreviousMicros = 0;
 int targetRPM = 0;
@@ -221,8 +221,8 @@ void setup()
   pinMode(stepperRSleepPin, OUTPUT);
   pinMode(stepperLSleepPin, OUTPUT);
 
-  stepperR.setMaxSpeed(800);
-  stepperL.setMaxSpeed(800);
+  stepperR.setMaxSpeed(600);
+  stepperL.setMaxSpeed(600);
 
   //Disable the steppers until they are needed
   EnableDisableSteppers(false);
@@ -383,7 +383,7 @@ void ProcessIncomingRemoteData()
 //**********************************************************************
 int FilterValue(int newValue, int previousValue)
 {
-  float EMA_a = 0.2; // EMA Alpha
+  float EMA_a = 0.3; // EMA Alpha
   return newValue = (EMA_a * previousValue) + ((1 - EMA_a) * newValue);
 }
 
@@ -412,21 +412,15 @@ void EnableDisableSteppers(bool state)
 //**********************************************************************
 int ShiftGears(int newGear, int currentGear)
 {
-  bool upshift; //Flag to determine if shift is and upshift or downshift
+
+  //Check to ensure that the new gear is valid
+  if (newGear > 7 || newGear < 0 || currentGear == newGear)
+  {
+    Serial.println("Invalid Gear Selection");
+    return currentGear;
+  }
+
   bool shiftComplete = false;
-
-  if (currentGear < newGear)
-  {
-    upshift = true;
-  }
-  else
-  {
-    upshift = false;
-  }
-
-  newGear = constrain(newGear, 0, 7);
-
-  unsigned long timer = micros();
 
   int filteredValueRPot = analogRead(potRPin);
   int filteredValueLPot = analogRead(potLPin);
@@ -443,6 +437,8 @@ int ShiftGears(int newGear, int currentGear)
 
   int stepperRRotationDirection = 1;
   int stepperLRotationDirection = 1;
+
+  unsigned long timer = micros();
 
   //Right barrel roation direction
   if (gearSettings[newGear][RIGHT] < filteredValueRPot)
@@ -470,7 +466,7 @@ int ShiftGears(int newGear, int currentGear)
   //Determine which barrel to move first
 
   //Upshift and left barrel is marked first
-  if (gearSettings[newGear][2] == 0 && upshift)
+  if (gearSettings[newGear][2] == 0 && currentGear < newGear)
   {
     //Left then right barrels
     Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
@@ -480,7 +476,7 @@ int ShiftGears(int newGear, int currentGear)
     }
   }
   //Upshift and right barrel is marked first
-  else if (gearSettings[newGear][2] == 1 && upshift)
+  else if (gearSettings[newGear][2] == 1 && currentGear < newGear)
   {
     Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
     //Right then left barrels
@@ -490,7 +486,7 @@ int ShiftGears(int newGear, int currentGear)
     }
   }
   //Downshift and left barrel marked first (We swap for downshifts)
-  else if (gearSettings[newGear][2] == 0 && !upshift)
+  else if (gearSettings[newGear][2] == 0 && currentGear > newGear)
   {
     Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
     //Right then left barrels
@@ -500,7 +496,7 @@ int ShiftGears(int newGear, int currentGear)
     }
   }
   //Downshift and right barrel marked first (We swap for downshifts
-  else if (gearSettings[newGear][2] == 1 && !upshift)
+  else if (gearSettings[newGear][2] == 1 && currentGear > newGear)
   {
     //Left then right barrels
     Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
@@ -511,22 +507,22 @@ int ShiftGears(int newGear, int currentGear)
   }
 
   long totalTime = micros() - timer;
-  Serial.print("Gear shift complete, new gear is ");
-  Serial.println(newGear);
-  Serial.print("Shift time is ");
-  Serial.println(totalTime);
 
   //Disable steppers
   EnableDisableSteppers(false);
 
   if (shiftComplete)
   {
-    Serial.println("Shift Failed");
-    engineRunning = false;
+    Serial.print("Gear shift complete, new gear is ");
+    Serial.println(newGear);
+    Serial.print("Shift time is ");
+    Serial.println(totalTime);
     return newGear;
   }
   else
   {
+    Serial.println("Shift Failed");
+    engineRunning = false;
     return currentGear;
   }
 }
@@ -539,7 +535,7 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
   int filteredValue = analogRead(potPin);
   int stepperBaseSpeed = startingShiftSpeed * rotationDirection;
   stepper.setSpeed(stepperBaseSpeed); //Set initial speed and direction of stepper
-  float accelRate = 1.27;
+  float accelRate = 1.7;
 
   int startPosition = filteredValue;
   int extent = abs(startPosition - destinationPotValue);
@@ -549,15 +545,14 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
   int stepCount = 0;
   int previousExtent = 0;
   int speed = 0;
-  int initialExtent = extent;
   //Run this loop until the pot value is within the threshold value for the target gear
   while (!reachedDestination)
   {
     if (stepper.runSpeed())
     {
       stepCount++;
-      speed = (startingShiftSpeed + pow(accelRate,stepCount)) * rotationDirection;
-/*
+      speed = (startingShiftSpeed + pow(accelRate, stepCount)) * rotationDirection;
+      /*
       if (initialExtent * .66 <= extent)
       {
         //Fast initial excel to max 500
@@ -576,27 +571,30 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
 */
       stepper.setSpeed(speed);
 
+      filteredValue = FilterValue(analogRead(potPin), filteredValue);
+
+      extent = abs(filteredValue - destinationPotValue);
+
       previousExtent = extent;
-    }
 
-    filteredValue = FilterValue(analogRead(potPin), filteredValue);
+      //Set the reached destination boolean, barrel maybe already in destination position
+      reachedDestination = extent <= gearValueThreshold;
 
-    extent = abs(filteredValue - destinationPotValue);
-
-    //Set the reached destination boolean, barrel maybe already in destination position
-    reachedDestination = extent <= gearValueThreshold;
-
-    //Safety to prevent damage to pots which has happened
-    if (filteredValue > 4050 || filteredValue < 50)
-    {
-      return false;
+      //Safety to prevent damage to pots which has happened
+      if (filteredValue > 4050 || filteredValue < 50)
+      {
+        Serial.println("-------------POT VALUE EXCEEDED BOUNDS-----------------");
+        return false;
+      }
     }
   }
+  /*
   Serial.println("*************Move Barrel Complete******************");
   Serial.print("Destination Pot Value: ");
   Serial.println(destinationPotValue);
   Serial.print("Filtered Pot Value: ");
   Serial.println(filteredValue);
+  */
   return true;
 }
 

@@ -295,6 +295,9 @@ void LearningMode()
     }
   }
   SendGearboxData(EndLearnMode);
+  ButtonIndicator();
+  ButtonIndicator();
+  ButtonIndicator();
   //Turn off Decimal point
   sevsegRight.analogWrite(15, 255);
 }
@@ -557,6 +560,7 @@ void ButtonIndicator()
   ShiftIndicatorDisplay(4);
   delay(100);
   ShiftIndicatorDisplay(0);
+  delay(100);
 }
 
 void Diagnostics()
