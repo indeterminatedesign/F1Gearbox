@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "F1SteeringWheelRemote",
+			"path": "..\\..\\F1SteeringWheelRemote"
+		},
+		{
+			"name": "F1GearboxController",
+			"path": ".."
+		},
+		{
+			"name": "GearboxDiag",
+			"path": "..\\..\\..\\GearboxDiag"
+		}
+	],
+	"settings": {}
+}

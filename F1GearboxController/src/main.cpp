@@ -72,7 +72,7 @@ unsigned long previousMicros = 0;
 bool engineRunning = true;
 
 const int rpmDebounceInterval = 100;
-const int startingShiftSpeed = 400;
+const int startingShiftSpeed = 350;
 const long rpmUpdateInterval = 100000;
 unsigned long rpmUpdatePreviousMicros = 0;
 int targetRPM = 0;
@@ -383,7 +383,7 @@ void ProcessIncomingRemoteData()
 //**********************************************************************
 int FilterValue(int newValue, int previousValue)
 {
-  float EMA_a = 0.3; // EMA Alpha
+  float EMA_a = 0.6; // EMA Alpha
   return newValue = (EMA_a * previousValue) + ((1 - EMA_a) * newValue);
 }
 
@@ -473,6 +473,14 @@ int ShiftGears(int newGear, int currentGear)
     if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]))
     {
       shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]);
+      if (!shiftComplete)
+      {
+        Serial.println("Error with Right Barrel");
+      }
+    }
+    else
+    {
+      Serial.println("Error with Left Barrel");
     }
   }
   //Upshift and right barrel is marked first
@@ -483,6 +491,14 @@ int ShiftGears(int newGear, int currentGear)
     if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]))
     {
       shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]);
+      if (!shiftComplete)
+      {
+        Serial.println("Error with Left Barrel");
+      }
+    }
+    else
+    {
+      Serial.println("Error with Right Barrel");
     }
   }
   //Downshift and left barrel marked first (We swap for downshifts)
@@ -493,6 +509,14 @@ int ShiftGears(int newGear, int currentGear)
     if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]))
     {
       shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]);
+      if (!shiftComplete)
+      {
+        Serial.println("Error with Left Barrel");
+      }
+    }
+    else
+    {
+      Serial.println("Error with Right Barrel");
     }
   }
   //Downshift and right barrel marked first (We swap for downshifts
@@ -503,6 +527,14 @@ int ShiftGears(int newGear, int currentGear)
     if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]))
     {
       shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]);
+      if (!shiftComplete)
+      {
+        Serial.println("Error with Right Barrel");
+      }
+    }
+    else
+    {
+      Serial.println("Error with Left Barrel");
     }
   }
 
@@ -535,7 +567,7 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
   int filteredValue = analogRead(potPin);
   int stepperBaseSpeed = startingShiftSpeed * rotationDirection;
   stepper.setSpeed(stepperBaseSpeed); //Set initial speed and direction of stepper
-  float accelRate = 1.7;
+  float accelRate = 1.6;
 
   int startPosition = filteredValue;
   int extent = abs(startPosition - destinationPotValue);
@@ -577,17 +609,19 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
 
       previousExtent = extent;
 
-      //Set the reached destination boolean, barrel maybe already in destination position
       reachedDestination = extent <= gearValueThreshold;
+    }
 
-      //Safety to prevent damage to pots which has happened
-      if (filteredValue > 4050 || filteredValue < 50)
-      {
-        Serial.println("-------------POT VALUE EXCEEDED BOUNDS-----------------");
-        return false;
-      }
+    //Safety to prevent damage to pots which has happened
+    if (filteredValue > 4090 || filteredValue < 0)
+    {
+      Serial.println("-------------POT VALUE EXCEEDED BOUNDS-----------------");
+      Serial.print("Filtered Value that Exceeded Bounds: ");
+      Serial.println(filteredValue);
+      return false;
     }
   }
+
   /*
   Serial.println("*************Move Barrel Complete******************");
   Serial.print("Destination Pot Value: ");
@@ -851,7 +885,9 @@ void Diagnostics()
   int RTestPos = 10 * CCW;
   int LTestPos = 10 * CW;
   stepperR.setSpeed(startingShiftSpeed * CCW);
+  stepperR.setAcceleration(200);
   stepperL.setSpeed(startingShiftSpeed * CW);
+  stepperL.setAcceleration(200);
   bool passedRTest = false;
   bool passedLTest = false;
 
@@ -871,11 +907,13 @@ void Diagnostics()
   Serial.println("********************************************************************");
 
   //Enable steppers
-  digitalWrite(stepperRSleepPin, HIGH);
-  digitalWrite(stepperLSleepPin, HIGH);
+  EnableDisableSteppers(true);
 
   while (!passedRTest || !passedLTest)
   {
+    passedRTest = false;
+    passedLTest = false;
+
     //Check if one of the pots is reading too close to a limit to get an accurate position reading
     if (initialRPotValue > 4085 || initialRPotValue < 10 || initialLPotValue > 4085 || initialLPotValue < 10)
     {
