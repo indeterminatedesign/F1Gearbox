@@ -14,7 +14,8 @@ static const float gearRatios[] =
 static const float finalDriveCoefficent = 3.38;
 static const float totalDragProduct = 2.5; //Not an actual drag coefficent, just use to simulate drag increasing with speed and acts as product of all the other factors
 static const float totalMassConstant = 2000;
-static const int idleRPM = 300;
+static const float powertrainFriction = .05;
+static const int idleRPM = 350;
 static const int revLimiter = 1200;
 static const int computeInterval = 50000; //Time in microseconds between recalculating a target rpm
 
@@ -36,6 +37,7 @@ static const int enginePowerBins[15][2] = {
     {1400, 825}};
 
 unsigned long previousSimulateMicros = 0;
+int previousGear;
 
 VehicleSimulation::~VehicleSimulation()
 {
@@ -51,15 +53,23 @@ int VehicleSimulation::Simulate(float percentThrottle, int inputLayRPM, int inpu
     if (dt > computeInterval && inputLayRPM > 1 && currentGear > 0)
     {
         int effectiveGearRatio = gearRatios[currentGear] * finalDriveCoefficent;
-        int vehicleSpeed = inputMainRPM / effectiveGearRatio;                                //final drive takes into account tire diameter
-        float effectivePercentThrottle = constrain(percentThrottle, 1, 100);                 //Effectively adding a floor to the percent throttle
-        float totalAvailableCurrentPower = ComputeEnginePower(inputLayRPM);                    //Power available at the current RPM assuming full throttle
-        float currentEffectivePower = effectivePercentThrottle * totalAvailableCurrentPower; //current power based on the throttle position
+        //final drive takes into account tire diameter
+        int vehicleSpeed = inputMainRPM / effectiveGearRatio;
+
+        //Effectively adding a floor to the percent throttle
+        float effectivePercentThrottle = constrain(percentThrottle, 1, 100);
+
+        //Force available at the current RPM assuming full throttle
+        float totalAvailableCurrentForce = ComputeEngineForce(inputLayRPM);
+
+        //Current power at the wheels based on the throttle position & gear ratio
+        float currentEffectiveForce = effectivePercentThrottle * totalAvailableCurrentForce * effectiveGearRatio;
+        float totalPowerTrainFriction = powertrainFriction * inputLayRPM;
 
         //A = F/M Thus engine powe r/some mass constant
-        // Power of engine at the wheels is dependent on gear ratio
+        // Force of engine at the wheels is dependent on gear ratio
         //Net Decel being experienced based on speed (product of all drag area and coeficients) * vehicleSpeed^2
-        float netAcceleration = (currentEffectivePower * effectiveGearRatio) / totalMassConstant - (totalDragProduct * pow(vehicleSpeed, 2));
+        float netAcceleration = (currentEffectiveForce / totalMassConstant) - totalPowerTrainFriction - (totalDragProduct * pow(vehicleSpeed, 2));
 
         //New target rpm is based on current rpm + delta T * netacceleration, based on V = V0 + AdT
         newTargetRPM = inputLayRPM + dt * netAcceleration;
@@ -71,10 +81,12 @@ int VehicleSimulation::Simulate(float percentThrottle, int inputLayRPM, int inpu
     //Constrain RPM between idle and rev limiter
     newTargetRPM = constrain(newTargetRPM, idleRPM, revLimiter);
 
+    previousGear = currentGear;
+
     return newTargetRPM;
 }
 
-float VehicleSimulation::ComputeEnginePower(int layshaftRPM)
+float VehicleSimulation::ComputeEngineForce(int layshaftRPM)
 {
     //Interpolate the current engine power based on RPMs between two bins
     int lowerBinIndex = 0;
@@ -91,4 +103,23 @@ float VehicleSimulation::ComputeEnginePower(int layshaftRPM)
 
     //Use map function to linear interpolate the power between the two bins
     return map(layshaftRPM, enginePowerBins[lowerBinIndex][0], enginePowerBins[upperBinIndex][0], enginePowerBins[lowerBinIndex][1], enginePowerBins[upperBinIndex][1]);
+}
+
+//Cut Throttle based on PWM value
+float VehicleSimulation::ThrottleCut()
+{
+    return 0.85;
+}
+
+int VehicleSimulation::RevMatch(int currentGear, int newGear)
+{
+    //Account for neutral which up or down has no rev match
+    if (currentGear == 0 || newGear == 0)
+    {
+        return 1.0f;
+    }
+    else
+    {
+        return (gearRatios[newGear] / gearRatios[currentGear]);
+    }
 }

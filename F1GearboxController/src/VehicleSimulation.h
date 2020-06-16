@@ -4,7 +4,7 @@ class VehicleSimulation
 {
 private:
     
-        float ComputeEnginePower(int layshaftRPM);
+        float ComputeEngineForce(int layshaftRPM);
     
 
 public:
@@ -17,7 +17,8 @@ public:
     int currentGear;
     static const int idleRPM = 300;
     int Simulate(float percentThrottle, int inputLayRPM, int inputMainRPM, int currentGear);
-    int RevMatch(int inputLayRPM, int inputMainRPM, int currentGear, int newGear);
+    int RevMatch(int currentGear, int newGear);
+    float ThrottleCut();
 };
 
 /*

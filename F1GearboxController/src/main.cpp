@@ -65,15 +65,15 @@ int speedControlPWM = 0;
 float previousError = 0;
 float integral = 0;
 unsigned long previousMotorSpeedControlMicros = 0;
-const float Kp = 2.5f;
-const float Ki = 0.6f; //0.15
-const float Kd = 0.0f; //.15
+const float Kp = 5.5f;
+const float Ki = 3.0f; //0.15
+const float Kd =1.5f; //.15
 unsigned long previousMicros = 0;
 bool engineRunning = true;
 
 const int rpmDebounceInterval = 100;
 const int startingShiftSpeed = 350;
-const long rpmUpdateInterval = 100000;
+const long rpmUpdateInterval = 50000;
 unsigned long rpmUpdatePreviousMicros = 0;
 int targetRPM = 0;
 float percentThrottle = 0;
@@ -144,6 +144,8 @@ int gearSettings[8][4] =
         {500, 500, 0, 7}    //7th
 };
 
+int pwmLookupByRPM[18][2];
+
 //Function Declarations
 int ShiftGears(int, int);
 bool moveBarrel(AccelStepper, int, int, int);
@@ -154,13 +156,15 @@ void LoadGearSettings();
 void StoreGearSettings();
 void Diagnostics();
 bool CountPulses(int pin, bool &bounceState, bool &previousSensorState, unsigned long &previousMicros, unsigned long &pulseCount);
-bool CalculateRPM();
+bool ComputeRPMOnInterval(unsigned long interval);
 int FilterValue(int, int);
 void ControlMotorSpeed(int);
 void SendRemoteData();
 void ProcessIncomingRemoteData();
 void ProcessIncomingRemoteDataOnInterval();
 void EnableDisableSteppers(bool state);
+void RevMatch(int currentGear, int newGear);
+void PopulatePWMLookup();
 
 //**********************************************************************
 // Callback when data is sent
@@ -243,6 +247,8 @@ void setup()
 
   //Check shift drums and pots for any issues
   Diagnostics();
+
+  PopulatePWMLookup();
 }
 //**********************************************************************
 //Loop
@@ -268,7 +274,7 @@ void loop()
   CountPulses(mainRPMPin, mainBounceState, mainPreviousRPMSensorState, mainPreviousMicros, mainPulseCount);
   CountPulses(layRPMPin, layBounceState, layPreviousRPMSensorState, layPreviousMicros, layPulseCount);
 
-  if (CalculateRPM()) //If the RPM value has been refreshed, control the motor's speed based on new value
+  if (ComputeRPMOnInterval(rpmUpdateInterval)) //If the RPM value has been refreshed, control the motor's speed based on new value
   {
     if (engineRunning)
     {
@@ -463,6 +469,13 @@ int ShiftGears(int newGear, int currentGear)
   //Enable steppers
   EnableDisableSteppers(true);
 
+  //Cut Throttle via to release sliders from dogs
+  if (currentGear < newGear)
+  {
+    speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
+    ledcWrite(pwmChannel, speedControlPWM);
+  }
+
   //Determine which barrel to move first
 
   //Upshift and left barrel is marked first
@@ -584,23 +597,7 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
     {
       stepCount++;
       speed = (startingShiftSpeed + pow(accelRate, stepCount)) * rotationDirection;
-      /*
-      if (initialExtent * .66 <= extent)
-      {
-        //Fast initial excel to max 500
-        speed = (startingShiftSpeed + stepCount * accelRate) * rotationDirection;
-      }
-      else if (initialExtent * .33 <= extent)
-      {
-        //Hold Velocity
-        speed = 400;
-      }
-      else
-      {
-        //Fast excel to complete max
-        speed = (startingShiftSpeed + stepCount * accelRate * 2) * rotationDirection;
-      }
-*/
+
       stepper.setSpeed(speed);
 
       filteredValue = FilterValue(analogRead(potPin), filteredValue);
@@ -630,6 +627,35 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
   Serial.println(filteredValue);
   */
   return true;
+}
+
+//**********************************************************************
+//  Rev Match the Gears Between shifts
+//**********************************************************************
+void RevMatch(int currentGear, int newGear)
+{
+  float revRatio = vehicle.RevMatch(currentGear, newGear);
+
+  //Use the target RPM not the current RPM because of the throttle cut
+  targetRPM = targetRPM * revRatio;
+  int lowerBinIndex = 0;
+  int upperBinIndex = 0;
+
+  for (int i = 0; i < 24; i++)
+  {
+    if (pwmLookupByRPM[i][0] >= targetRPM)
+    {
+      lowerBinIndex = i - 1;
+      upperBinIndex = i;
+      //Linearly interpolate between upper and lower values of the lookup to determine the perfect PWM value to match the revs
+      speedControlPWM = map(targetRPM, pwmLookupByRPM[0][lowerBinIndex], pwmLookupByRPM[0][upperBinIndex], pwmLookupByRPM[1][lowerBinIndex], pwmLookupByRPM[1][upperBinIndex]);
+      break;
+    }
+  }
+  ledcWrite(pwmChannel, speedControlPWM);
+
+  //Wait 2/100ths of a second for speed to change
+  delayMicroseconds(20000);
 }
 
 //**********************************************************************
@@ -672,14 +698,14 @@ void ControlMotorSpeed(int rpmTarget)
     integral = integral + (error * dt);
     if (abs(integral) > 200)
     {
-      integral = 200;
+      integral = 180;
     }
     float derivative = (error - previousError) / dt;
     previousError = error;
 
-    speedControlPWM = Kp * error + Ki * integral + Kd * derivative;
+    speedControlPWM =Kp * error + Ki * integral + Kd * derivative;
 
-    speedControlPWM = constrain(speedControlPWM, 50, 200);
+    speedControlPWM = constrain(speedControlPWM, 10, 180);
     /*
     Serial.print("Error ");
     Serial.println(error);
@@ -708,15 +734,15 @@ void ControlMotorSpeed(int rpmTarget)
 }
 
 //**********************************************************************
-//  CalculateRPM Count pulses and display rpm on an interval
+//  Compute RPM Count pulses and display rpm on an interval
 //**********************************************************************
-bool CalculateRPM()
+bool ComputeRPMOnInterval(unsigned long interval)
 {
   bool rpmUpdated = false;
   //Check when the RPM reading was last updated
   unsigned long dt = micros() - rpmUpdatePreviousMicros;
 
-  if (dt >= rpmUpdateInterval)
+  if (dt >= interval)
   {
     mainRpm = (mainPulseCount / 12.0000) / (dt / 60000000.0000);
     layRpm = (layPulseCount / 12.0000) / (dt / 60000000.0000);
@@ -726,10 +752,9 @@ bool CalculateRPM()
     mainRpmFiltered = FilterValue(mainRpm, mainRpmFiltered);
     layRpmFiltered = FilterValue(layRpm, layRpmFiltered);
 
-    Serial.print("Main RPM: ");
-    Serial.println(mainRpmFiltered);
-
-    Serial.print("Lay RPM: ");
+    //Serial.println("MainRPM,LayRPM ");
+    Serial.print(mainRpmFiltered);
+    Serial.print(",");
     Serial.println(layRpmFiltered);
 
     //Serial.print("Main RPM: ");
@@ -985,5 +1010,51 @@ void Diagnostics()
     digitalWrite(stepperLSleepPin, LOW);
 
     delay(1000);
+  }
+}
+
+void PopulatePWMLookup()
+{
+  const int rpmIncriment = 25;
+  Serial.println("RPM,Gear");
+  for (int i = 0; i < 18; i++)
+  {
+    int lookupTargetRPM = i * rpmIncriment + 350;
+    Serial.print("Target RPM: ");
+    Serial.println(lookupTargetRPM);
+
+    bool recordedValue = false;
+    const int numSamples = 5;
+    int pwmSum = 0;
+    int sampleCount = 0;
+
+    while (!recordedValue)
+    {
+      //Count Pulses with Debouncing
+      CountPulses(mainRPMPin, mainBounceState, mainPreviousRPMSensorState, mainPreviousMicros, mainPulseCount);
+      CountPulses(layRPMPin, layBounceState, layPreviousRPMSensorState, layPreviousMicros, layPulseCount);
+
+      if (ComputeRPMOnInterval(rpmUpdateInterval)) //If the RPM value has been refreshed, control the motor's speed based on new value
+      {
+        ControlMotorSpeed(lookupTargetRPM);
+      }
+      if (abs(layRpmFiltered - lookupTargetRPM) < 15)
+      {
+        pwmSum += speedControlPWM;
+        sampleCount++;
+        delayMicroseconds(50000);
+      }
+      if (sampleCount > 4)
+      {
+        //Store RPM
+        pwmLookupByRPM[i][0] = lookupTargetRPM;
+        //Store Average PWM value into table
+        pwmLookupByRPM[i][1] = pwmSum / numSamples;
+        recordedValue = true;
+      }
+    }
+    Serial.print(pwmLookupByRPM[i][0]);
+    Serial.print(",");
+    Serial.println(pwmLookupByRPM[i][1]);
   }
 }
