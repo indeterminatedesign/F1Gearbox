@@ -15,7 +15,7 @@ public:
     int inputLayRPM;
     int inputMainRPM;
     int currentGear;
-    static const int idleRPM = 300;
+    static const int idleRPM = 450;
     int Simulate(float percentThrottle, int inputLayRPM, int inputMainRPM, int currentGear);
     int RevMatch(int currentGear, int newGear);
     float ThrottleCut();

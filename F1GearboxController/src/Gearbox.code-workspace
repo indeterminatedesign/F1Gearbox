@@ -11,6 +11,10 @@
 		{
 			"name": "GearboxDiag",
 			"path": "..\\..\\..\\GearboxDiag"
+		},
+		{
+			"name": "PID AutoTune",
+			"path": "..\\..\\..\\PID AutoTune"
 		}
 	],
 	"settings": {}

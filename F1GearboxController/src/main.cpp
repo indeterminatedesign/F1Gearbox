@@ -65,15 +65,14 @@ int speedControlPWM = 0;
 float previousError = 0;
 float integral = 0;
 unsigned long previousMotorSpeedControlMicros = 0;
-const float Kp = 5.5f;
-const float Ki = 3.0f; //0.15
-const float Kd =1.5f; //.15
+const float Kp = 0.6f;
+const float Ki = 0.5f;   //0.15
+const float Kd = 0.125f; //.15
 unsigned long previousMicros = 0;
-bool engineRunning = true;
+bool engineRunning = false;
 
 const int rpmDebounceInterval = 100;
-const int startingShiftSpeed = 350;
-const long rpmUpdateInterval = 50000;
+const long rpmUpdateInterval = 100000;
 unsigned long rpmUpdatePreviousMicros = 0;
 int targetRPM = 0;
 float percentThrottle = 0;
@@ -144,11 +143,46 @@ int gearSettings[8][4] =
         {500, 500, 0, 7}    //7th
 };
 
+const int startingStepperSpeed = 250;
+const int midStepperSpeed = 600;
+const int stepperCamPoint = 9;
+const int stepperSpeedsTable[30]{
+    450,
+587,
+695,
+780,
+838,
+879,
+907,
+927,
+941,
+952,
+960,
+966,
+971,
+975,
+978,
+981,
+983,
+985,
+986,
+988,
+989,
+990,
+991,
+991,
+992,
+993,
+993,
+994,
+994,
+994};
+
 int pwmLookupByRPM[18][2];
 
 //Function Declarations
 int ShiftGears(int, int);
-bool moveBarrel(AccelStepper, int, int, int);
+bool moveBarrel(AccelStepper, int, int, int, bool);
 void LearnGear(int);
 void handleWeb();
 void initializeWifi();
@@ -225,8 +259,8 @@ void setup()
   pinMode(stepperRSleepPin, OUTPUT);
   pinMode(stepperLSleepPin, OUTPUT);
 
-  stepperR.setMaxSpeed(600);
-  stepperL.setMaxSpeed(600);
+  stepperR.setMaxSpeed(1000);
+  stepperL.setMaxSpeed(1000);
 
   //Disable the steppers until they are needed
   EnableDisableSteppers(false);
@@ -248,7 +282,7 @@ void setup()
   //Check shift drums and pots for any issues
   Diagnostics();
 
-  PopulatePWMLookup();
+  //PopulatePWMLookup();
 }
 //**********************************************************************
 //Loop
@@ -389,7 +423,7 @@ void ProcessIncomingRemoteData()
 //**********************************************************************
 int FilterValue(int newValue, int previousValue)
 {
-  float EMA_a = 0.6; // EMA Alpha
+  float EMA_a = 0.4; // EMA Alpha
   return newValue = (EMA_a * previousValue) + ((1 - EMA_a) * newValue);
 }
 
@@ -419,8 +453,9 @@ void EnableDisableSteppers(bool state)
 int ShiftGears(int newGear, int currentGear)
 {
 
+  //Plan the Shift
   //Check to ensure that the new gear is valid
-  if (newGear > 7 || newGear < 0 || currentGear == newGear)
+  if (newGear > 7 || newGear < 0)
   {
     Serial.println("Invalid Gear Selection");
     return currentGear;
@@ -431,6 +466,7 @@ int ShiftGears(int newGear, int currentGear)
   int filteredValueRPot = analogRead(potRPin);
   int filteredValueLPot = analogRead(potLPin);
 
+  //Logging
   Serial.print("Current Value R Pot ");
   Serial.println(filteredValueRPot);
   Serial.print("Current Value L Pot ");
@@ -470,11 +506,9 @@ int ShiftGears(int newGear, int currentGear)
   EnableDisableSteppers(true);
 
   //Cut Throttle via to release sliders from dogs
-  if (currentGear < newGear)
-  {
-    speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
-    ledcWrite(pwmChannel, speedControlPWM);
-  }
+
+  speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
+  ledcWrite(pwmChannel, speedControlPWM);
 
   //Determine which barrel to move first
 
@@ -483,9 +517,10 @@ int ShiftGears(int newGear, int currentGear)
   {
     //Left then right barrels
     Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-    if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]))
+    if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], false))
     {
-      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]);
+      //Rev Match code goes here
+      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], true);
       if (!shiftComplete)
       {
         Serial.println("Error with Right Barrel");
@@ -501,11 +536,12 @@ int ShiftGears(int newGear, int currentGear)
   {
     Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
     //Right then left barrels
-    if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]))
+    if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], false))
     {
-      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]);
+      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], true);
       if (!shiftComplete)
       {
+        engineRunning = false;
         Serial.println("Error with Left Barrel");
       }
     }
@@ -519,9 +555,9 @@ int ShiftGears(int newGear, int currentGear)
   {
     Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
     //Right then left barrels
-    if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]))
+    if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], false))
     {
-      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]);
+      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], true);
       if (!shiftComplete)
       {
         Serial.println("Error with Left Barrel");
@@ -537,9 +573,9 @@ int ShiftGears(int newGear, int currentGear)
   {
     //Left then right barrels
     Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-    if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT]))
+    if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], false))
     {
-      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT]);
+      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], true);
       if (!shiftComplete)
       {
         Serial.println("Error with Right Barrel");
@@ -575,48 +611,80 @@ int ShiftGears(int newGear, int currentGear)
 //**********************************************************************
 //  Move Barrel
 //**********************************************************************
-bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int destinationPotValue)
+bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int destinationPotValue, bool isEngagingGear)
 {
-  int filteredValue = analogRead(potPin);
-  int stepperBaseSpeed = startingShiftSpeed * rotationDirection;
-  stepper.setSpeed(stepperBaseSpeed); //Set initial speed and direction of stepper
-  float accelRate = 1.6;
+  int filteredPotValue = analogRead(potPin);
+  stepper.setSpeed(startingStepperSpeed * rotationDirection); //Set initial speed and direction of stepper
 
-  int startPosition = filteredValue;
+  int startPosition = filteredPotValue;
   int extent = abs(startPosition - destinationPotValue);
+  int initialExtent = extent;
   //Set the reached destination boolean, barrel maybe already in destination position
   bool reachedDestination = extent <= gearValueThreshold;
 
   int stepCount = 0;
-  int previousExtent = 0;
   int speed = 0;
+
+  bool overShot = false;
   //Run this loop until the pot value is within the threshold value for the target gear
   while (!reachedDestination)
   {
     if (stepper.runSpeed())
     {
-      stepCount++;
-      speed = (startingShiftSpeed + pow(accelRate, stepCount)) * rotationDirection;
+      //Calculate how far we have to go to the destination
+      extent = abs(filteredPotValue - destinationPotValue);
 
-      stepper.setSpeed(speed);
+      //Lookup the stepper speed from a table
+      speed = stepperSpeedsTable[stepCount];
 
-      filteredValue = FilterValue(analogRead(potPin), filteredValue);
+      //Slow the stepper down to prepare for slider to dog misalignment if engaging a gear with this rotation
+      //Speed things up as soon as we've crossed half way because we know we're engaging the gear
+      if (isEngagingGear)
+      {
+        if ((stepCount >= stepperCamPoint && extent < initialExtent / 2))
+        {
+          speed = midStepperSpeed;
+        }
+      }
 
-      extent = abs(filteredValue - destinationPotValue);
+      //Set the stepper speed
+      stepper.setSpeed(speed * rotationDirection);
 
-      previousExtent = extent;
+      filteredPotValue = FilterValue(analogRead(potPin), filteredPotValue);
+      /*
+      if ((startPosition < destinationPotValue && filteredPotValue > destinationPotValue + gearValueThreshold) || (startPosition > destinationPotValue && filteredPotValue < destinationPotValue - gearValueThreshold))
+      {
+        //We've overshot
+        //Reset speed
+        speed = startingStepperSpeed *rotationDirection * -1;
+        //Step backwards
+        overShot = true;
+        //Reset the start position to the current position
+        startPosition = filteredPotValue;
+      }
+      */
 
       reachedDestination = extent <= gearValueThreshold;
+
+      if (stepCount > 29)
+      {
+        stepCount++;
+      }
     }
 
     //Safety to prevent damage to pots which has happened
-    if (filteredValue > 4090 || filteredValue < 0)
+    if (filteredPotValue > 4090 || filteredPotValue < 0)
     {
       Serial.println("-------------POT VALUE EXCEEDED BOUNDS-----------------");
       Serial.print("Filtered Value that Exceeded Bounds: ");
-      Serial.println(filteredValue);
+      Serial.println(filteredPotValue);
       return false;
     }
+  }
+
+  if (overShot)
+  {
+    Serial.println("Shift Barrel Overshot");
   }
 
   /*
@@ -696,16 +764,16 @@ void ControlMotorSpeed(int rpmTarget)
     float dt = (micros() - previousMotorSpeedControlMicros) / 1000000.0f;
 
     integral = integral + (error * dt);
-    if (abs(integral) > 200)
+    if (abs(integral) > 220)
     {
-      integral = 180;
+      integral = 220;
     }
     float derivative = (error - previousError) / dt;
     previousError = error;
 
-    speedControlPWM =Kp * error + Ki * integral + Kd * derivative;
+    speedControlPWM = Kp * error + Ki * integral + Kd * derivative;
 
-    speedControlPWM = constrain(speedControlPWM, 10, 180);
+    speedControlPWM = constrain(speedControlPWM, 20, 220);
     /*
     Serial.print("Error ");
     Serial.println(error);
@@ -909,9 +977,9 @@ void Diagnostics()
   int initialLPotValue = analogRead(potLPin);
   int RTestPos = 10 * CCW;
   int LTestPos = 10 * CW;
-  stepperR.setSpeed(startingShiftSpeed * CCW);
+  stepperR.setSpeed(startingStepperSpeed * CCW);
   stepperR.setAcceleration(200);
-  stepperL.setSpeed(startingShiftSpeed * CW);
+  stepperL.setSpeed(startingStepperSpeed * CW);
   stepperL.setAcceleration(200);
   bool passedRTest = false;
   bool passedLTest = false;

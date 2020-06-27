@@ -15,7 +15,7 @@ static const float finalDriveCoefficent = 3.38;
 static const float totalDragProduct = 2.5; //Not an actual drag coefficent, just use to simulate drag increasing with speed and acts as product of all the other factors
 static const float totalMassConstant = 2000;
 static const float powertrainFriction = .05;
-static const int idleRPM = 350;
+static const int idleRPM = 450;
 static const int revLimiter = 1200;
 static const int computeInterval = 50000; //Time in microseconds between recalculating a target rpm
 
