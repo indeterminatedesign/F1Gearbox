@@ -4,17 +4,21 @@
 AS5600::AS5600()
 {
   //set up AS5600
-  Wire.begin();
-
+  myWire.begin();
+}
+AS5600::AS5600(int sclPin, int sdaPin)
+{
+ myWire = Wire1;
+ myWire.begin(sdaPin, sclPin);
 }
 long AS5600::getPosition()
 {
-  return _getRegisters2(_RAWANGLEAddressMSB, _RAWANGLEAddressLSB);  
+  return _getRegisters2(_RAWANGLEAddressMSB, _RAWANGLEAddressLSB);
 }
 
 int AS5600::getAngle()
 {
-  return _getRegisters2(_ANGLEAddressMSB, _ANGLEAddressLSB);  
+  return _getRegisters2(_ANGLEAddressMSB, _ANGLEAddressLSB);
 }
 
 int AS5600::getStatus()
@@ -34,14 +38,15 @@ int AS5600::getMagnitude()
 
 int AS5600::_getRegister(byte register1)
 {
-  Wire.beginTransmission(_AS5600Address);
-  Wire.write(register1);
-  Wire.endTransmission();
+  myWire.beginTransmission(_AS5600Address);
+  myWire.write(register1);
+  myWire.endTransmission();
 
-  Wire.requestFrom(_AS5600Address, 1);
+  myWire.requestFrom(_AS5600Address, 1);
 
-  if(Wire.available() <=1) {
-    _msb = Wire.read();
+  if (myWire.available() <= 1)
+  {
+    _msb = myWire.read();
   }
 
   return _msb;
@@ -51,26 +56,28 @@ long AS5600::_getRegisters2(byte registerMSB, byte registerLSB)
 {
   _lsb = 0;
   _msb = 0;
-  
-  Wire.beginTransmission(_AS5600Address);
-  Wire.write(registerMSB);
-  Wire.endTransmission();
+
+  myWire.beginTransmission(_AS5600Address);
+  myWire.write(registerMSB);
+  myWire.endTransmission();
   delay(10);
 
-  Wire.requestFrom(_AS5600Address, 1);
+  myWire.requestFrom(_AS5600Address, 1);
 
-  if(Wire.available() <=1) {
-    _msb = Wire.read();
+  if (myWire.available() <= 1)
+  {
+    _msb = myWire.read();
   }
 
-  Wire.requestFrom(_AS5600Address, 1);
+  myWire.requestFrom(_AS5600Address, 1);
 
-  Wire.beginTransmission(_AS5600Address);
-  Wire.write(registerLSB);
-  Wire.endTransmission();
+  myWire.beginTransmission(_AS5600Address);
+  myWire.write(registerLSB);
+  myWire.endTransmission();
 
-  if(Wire.available() <=1) {
-    _lsb = Wire.read();
+  if (myWire.available() <= 1)
+  {
+    _lsb = myWire.read();
   }
 
   return (_lsb) + (_msb & _msbMask) * 256;

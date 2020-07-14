@@ -8,12 +8,13 @@
 #define AS5600_h
 
 #include "Arduino.h"
-#include <Wire.h>
+#include <C:\Users\MereBrianPC\.platformio\packages\framework-arduinoespressif32\libraries\Wire\src\Wire.h>
 
 class AS5600
 {
   public:
     AS5600();
+    AS5600(int sclPin, int sdaPin);
     long getPosition();
     int getAngle();
     int getStatus();
@@ -44,6 +45,7 @@ class AS5600
       byte _MAGNITUDEAddressLSB = 0x1C;
       byte _BURNAddress = 0xFF;
 
+      TwoWire myWire = Wire;
       long _msb;
       long _lsb;
       long _msbMask = 0b00001111;

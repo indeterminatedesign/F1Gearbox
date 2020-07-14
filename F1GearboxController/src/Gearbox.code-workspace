@@ -21,5 +21,7 @@
 			"path": "..\\..\\..\\AS5600 Test"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"idf.portWin": "COM13"
+	}
 }

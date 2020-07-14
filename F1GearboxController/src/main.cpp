@@ -6,6 +6,8 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <VehicleSimulation.h>
+#include <AS5600.h>
+//#include <C:\Users\MereBrianPC\.platformio\packages\framework-arduinoespressif32\libraries\Wire\src\Wire.h>
 
 //Define all the pins
 const int stepperLPin = 23;      //Step pin
@@ -20,6 +22,8 @@ const int escPin = 12;           //Speed controller pin
 const int mainRPMPin = 5;        //Pin for interupt of the mainshaft photo sensor
 const int layRPMPin = 18;        //Pin for interupt of the layshaft photo sensor
 const int acceleratorPin = 0;    //Pin for input from a 10k pot representing accelerator
+const int sda2Pin = 33;
+const int scl2Pin = 32;
 
 // Initialiize the Stepper motors
 AccelStepper stepperR(1, stepperRPin, stepperRDirPin);
@@ -27,6 +31,10 @@ AccelStepper stepperL(1, stepperLPin, stepperLDirPin);
 
 //
 VehicleSimulation vehicle;
+
+//
+AS5600 rightEncoder;
+AS5600 leftEncoder = AS5600(scl2Pin,sda2Pin);
 
 //Direction Definitions for Steppers
 const int CW = 1;
