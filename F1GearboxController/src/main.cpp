@@ -66,8 +66,8 @@ float previousError = 0;
 float integral = 0;
 unsigned long previousMotorSpeedControlMicros = 0;
 const float Kp = 0.6f;
-const float Ki = 0.5f;   //0.15
-const float Kd = 0.125f; //.15
+const float Ki = 0.15f; //0.15
+const float Kd = 0.0f; //.15
 unsigned long previousMicros = 0;
 bool engineRunning = false;
 
@@ -143,40 +143,47 @@ int gearSettings[8][4] =
         {500, 500, 0, 7}    //7th
 };
 
-const int startingStepperSpeed = 250;
-const int midStepperSpeed = 600;
-const int stepperCamPoint = 9;
-const int stepperSpeedsTable[30]{
-    450,
-587,
-695,
-780,
+const int stepperCamPoint = 11;
+const int startingStepperSpeed = 400; //Used by diagnostics function only
+const int stepperAccelTable[30]{
+450,
+557,
+654,
+732,
+793,
 838,
-879,
-907,
-927,
+872,
+897,
+916,
+930,
 941,
-952,
-960,
-966,
+950,
+957,
+963,
+967,
 971,
-975,
-978,
+974,
+977,
+979,
 981,
 983,
 985,
 986,
+987,
 988,
 989,
 990,
+990,
 991,
-991,
-992,
-993,
-993,
-994,
-994,
-994};
+992};
+
+const int stepperDecelTable[6]{
+    981,
+    791,
+    642,
+    533,
+    454,
+    400};
 
 int pwmLookupByRPM[18][2];
 
@@ -191,7 +198,7 @@ void StoreGearSettings();
 void Diagnostics();
 bool CountPulses(int pin, bool &bounceState, bool &previousSensorState, unsigned long &previousMicros, unsigned long &pulseCount);
 bool ComputeRPMOnInterval(unsigned long interval);
-int FilterValue(int, int);
+int FilterValue(int, int, float EMA_a);
 void ControlMotorSpeed(int);
 void SendRemoteData();
 void ProcessIncomingRemoteData();
@@ -259,8 +266,8 @@ void setup()
   pinMode(stepperRSleepPin, OUTPUT);
   pinMode(stepperLSleepPin, OUTPUT);
 
-  stepperR.setMaxSpeed(1000);
-  stepperL.setMaxSpeed(1000);
+  stepperR.setMaxSpeed(2000);
+  stepperL.setMaxSpeed(2000);
 
   //Disable the steppers until they are needed
   EnableDisableSteppers(false);
@@ -421,9 +428,8 @@ void ProcessIncomingRemoteData()
 //**********************************************************************
 //  Filter a Value
 //**********************************************************************
-int FilterValue(int newValue, int previousValue)
+int FilterValue(int newValue, int previousValue, float EMA_a)
 {
-  float EMA_a = 0.4; // EMA Alpha
   return newValue = (EMA_a * previousValue) + ((1 - EMA_a) * newValue);
 }
 
@@ -452,7 +458,6 @@ void EnableDisableSteppers(bool state)
 //**********************************************************************
 int ShiftGears(int newGear, int currentGear)
 {
-
   //Plan the Shift
   //Check to ensure that the new gear is valid
   if (newGear > 7 || newGear < 0)
@@ -614,62 +619,36 @@ int ShiftGears(int newGear, int currentGear)
 bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int destinationPotValue, bool isEngagingGear)
 {
   int filteredPotValue = analogRead(potPin);
-  stepper.setSpeed(startingStepperSpeed * rotationDirection); //Set initial speed and direction of stepper
+  stepper.setSpeed(stepperAccelTable[0] * rotationDirection); //Set initial speed and direction of stepper
 
   int startPosition = filteredPotValue;
   int extent = abs(startPosition - destinationPotValue);
-  int initialExtent = extent;
+  int beginDecelExtent = extent * 0.08;
+  bool isDecelerating = false;
+
   //Set the reached destination boolean, barrel maybe already in destination position
   bool reachedDestination = extent <= gearValueThreshold;
-
+  // Actual true number of steps taken
   int stepCount = 0;
+
+  //Step count relative to acceleration table
+  int stepCountAccelLookup = 1;
   int speed = 0;
 
-  bool overShot = false;
   //Run this loop until the pot value is within the threshold value for the target gear
   while (!reachedDestination)
   {
-    if (stepper.runSpeed())
+    filteredPotValue = FilterValue(analogRead(potPin), filteredPotValue, 0.9f);
+
+    //Calculate how far we have to go to the destination
+    extent = abs(filteredPotValue - destinationPotValue);
+    reachedDestination = extent <= gearValueThreshold;
+
+    //Check to see if we've reached the destination, if so just break out and return true;
+    if (reachedDestination)
     {
-      //Calculate how far we have to go to the destination
-      extent = abs(filteredPotValue - destinationPotValue);
-
-      //Lookup the stepper speed from a table
-      speed = stepperSpeedsTable[stepCount];
-
-      //Slow the stepper down to prepare for slider to dog misalignment if engaging a gear with this rotation
-      //Speed things up as soon as we've crossed half way because we know we're engaging the gear
-      if (isEngagingGear)
-      {
-        if ((stepCount >= stepperCamPoint && extent < initialExtent / 2))
-        {
-          speed = midStepperSpeed;
-        }
-      }
-
-      //Set the stepper speed
-      stepper.setSpeed(speed * rotationDirection);
-
-      filteredPotValue = FilterValue(analogRead(potPin), filteredPotValue);
-      /*
-      if ((startPosition < destinationPotValue && filteredPotValue > destinationPotValue + gearValueThreshold) || (startPosition > destinationPotValue && filteredPotValue < destinationPotValue - gearValueThreshold))
-      {
-        //We've overshot
-        //Reset speed
-        speed = startingStepperSpeed *rotationDirection * -1;
-        //Step backwards
-        overShot = true;
-        //Reset the start position to the current position
-        startPosition = filteredPotValue;
-      }
-      */
-
-      reachedDestination = extent <= gearValueThreshold;
-
-      if (stepCount > 29)
-      {
-        stepCount++;
-      }
+      reachedDestination = true;
+      break;
     }
 
     //Safety to prevent damage to pots which has happened
@@ -678,14 +657,55 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
       Serial.println("-------------POT VALUE EXCEEDED BOUNDS-----------------");
       Serial.print("Filtered Value that Exceeded Bounds: ");
       Serial.println(filteredPotValue);
-      return false;
+      reachedDestination = false;
+      break;
+    }
+
+    //If a step occurred, set the new stepper speeds
+    if (stepper.runSpeed())
+    {
+      //Slow the stepper down to prepare for slider to dog misalignment
+      //if engaging a gear with this rotation
+      if (isEngagingGear)
+      {
+        if (stepCount >= stepperCamPoint)
+        {
+          stepCountAccelLookup = 1;
+          isEngagingGear = false;
+        }
+      }
+
+      if (beginDecelExtent > extent)
+      {
+        stepCountAccelLookup = 0;
+        isDecelerating = true;
+      }
+
+      //Lookup the stepper speed from a table
+      if (!isDecelerating)
+      {
+        stepCountAccelLookup = constrain(stepCountAccelLookup, 0, 29);
+        speed = stepperAccelTable[stepCountAccelLookup];
+      }
+      else
+      {
+        stepCountAccelLookup = constrain(stepCountAccelLookup, 0, 5);
+        speed = stepperDecelTable[stepCountAccelLookup];
+      }
+
+      //Set the stepper speed
+      stepper.setSpeed(speed * rotationDirection);
+
+      //Incriment the stepper speed lookup up
+      stepCountAccelLookup++;
+
+      //Incriment the total step count
+      stepCount++;
     }
   }
 
-  if (overShot)
-  {
-    Serial.println("Shift Barrel Overshot");
-  }
+  Serial.print("Step Count: ");
+  Serial.println(stepCount);
 
   /*
   Serial.println("*************Move Barrel Complete******************");
@@ -694,7 +714,7 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
   Serial.print("Filtered Pot Value: ");
   Serial.println(filteredValue);
   */
-  return true;
+  return reachedDestination;
 }
 
 //**********************************************************************
@@ -721,9 +741,6 @@ void RevMatch(int currentGear, int newGear)
     }
   }
   ledcWrite(pwmChannel, speedControlPWM);
-
-  //Wait 2/100ths of a second for speed to change
-  delayMicroseconds(20000);
 }
 
 //**********************************************************************
@@ -737,8 +754,8 @@ void LearnGear(int gear)
   //Read pot value and run thru the filter function x times to eliminate jitter
   for (int i = 0; i < 3; i++)
   {
-    filteredValueRPot = FilterValue(analogRead(potRPin), filteredValueRPot);
-    filteredValueLPot = FilterValue(analogRead(potLPin), filteredValueLPot);
+    filteredValueRPot = FilterValue(analogRead(potRPin), filteredValueRPot, 0.6f);
+    filteredValueLPot = FilterValue(analogRead(potLPin), filteredValueLPot, 0.6f);
     delay(1);
   }
 
@@ -817,8 +834,8 @@ bool ComputeRPMOnInterval(unsigned long interval)
     mainPulseCount = 0;
     layPulseCount = 0;
 
-    mainRpmFiltered = FilterValue(mainRpm, mainRpmFiltered);
-    layRpmFiltered = FilterValue(layRpm, layRpmFiltered);
+    mainRpmFiltered = FilterValue(mainRpm, mainRpmFiltered, 0.9f);
+    layRpmFiltered = FilterValue(layRpm, layRpmFiltered, 0.9f);
 
     //Serial.println("MainRPM,LayRPM ");
     Serial.print(mainRpmFiltered);

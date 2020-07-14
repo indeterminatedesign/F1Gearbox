@@ -15,6 +15,10 @@
 		{
 			"name": "PID AutoTune",
 			"path": "..\\..\\..\\PID AutoTune"
+		},
+		{
+			"name": "AS5600 Test",
+			"path": "..\\..\\..\\AS5600 Test"
 		}
 	],
 	"settings": {}
