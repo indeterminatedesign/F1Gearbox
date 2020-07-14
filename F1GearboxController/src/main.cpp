@@ -34,7 +34,7 @@ VehicleSimulation vehicle;
 
 //
 AS5600 rightEncoder;
-AS5600 leftEncoder = AS5600(scl2Pin,sda2Pin);
+AS5600 leftEncoder = AS5600(scl2Pin, sda2Pin);
 
 //Direction Definitions for Steppers
 const int CW = 1;
@@ -75,7 +75,7 @@ float integral = 0;
 unsigned long previousMotorSpeedControlMicros = 0;
 const float Kp = 0.6f;
 const float Ki = 0.15f; //0.15
-const float Kd = 0.0f; //.15
+const float Kd = 0.0f;  //.15
 unsigned long previousMicros = 0;
 bool engineRunning = false;
 
@@ -120,9 +120,7 @@ bool actionFlag = false; //Used to stop loading data recieved until the action t
 const int NoAction = 0;
 const int Upshift = 1;
 const int Downshift = 2;
-const int BeginLearnMode = 3;
 const int StoreValues = 4;
-const int EndLearnMode = 5;
 const int StartStopEngine = 6;
 const int Error = 9;
 
@@ -154,36 +152,36 @@ int gearSettings[8][4] =
 const int stepperCamPoint = 11;
 const int startingStepperSpeed = 400; //Used by diagnostics function only
 const int stepperAccelTable[30]{
-450,
-557,
-654,
-732,
-793,
-838,
-872,
-897,
-916,
-930,
-941,
-950,
-957,
-963,
-967,
-971,
-974,
-977,
-979,
-981,
-983,
-985,
-986,
-987,
-988,
-989,
-990,
-990,
-991,
-992};
+    450,
+    557,
+    654,
+    732,
+    793,
+    838,
+    872,
+    897,
+    916,
+    930,
+    941,
+    950,
+    957,
+    963,
+    967,
+    971,
+    974,
+    977,
+    979,
+    981,
+    983,
+    985,
+    986,
+    987,
+    988,
+    989,
+    990,
+    990,
+    991,
+    992};
 
 const int stepperDecelTable[6]{
     981,
@@ -197,8 +195,8 @@ int pwmLookupByRPM[18][2];
 
 //Function Declarations
 int ShiftGears(int, int);
-bool moveBarrel(AccelStepper, int, int, int, bool);
-void LearnGear(int);
+bool moveBarrel(AccelStepper, int, AS5600 encoder, int, bool);
+void LearnGear();
 void handleWeb();
 void initializeWifi();
 void LoadGearSettings();
@@ -295,7 +293,7 @@ void setup()
   LoadGearSettings();
 
   //Check shift drums and pots for any issues
-  Diagnostics();
+  //Diagnostics();
 
   //PopulatePWMLookup();
 }
@@ -406,17 +404,9 @@ void ProcessIncomingRemoteData()
       currentGear = ShiftGears(currentGear - 1, currentGear);
       //TODO: Up revs of motor based on new gear ratio
       break;
-    case BeginLearnMode:
-      //Stop the motor
-      ControlMotorSpeed(0);
-      break;
     case StoreValues:
       //Call learn gears to store the current gear's shift drum positions
-      LearnGear(incomingCurrentGear);
-      break;
-    case EndLearnMode:
-      //Learning is complete, store to EEPROM and reset flags and gear
-      StoreGearSettings();
+      LearnGear();
       break;
     case StartStopEngine:
       //If the engine isn't running start it up, otherwise turn it off
@@ -476,42 +466,35 @@ int ShiftGears(int newGear, int currentGear)
 
   bool shiftComplete = false;
 
-  int filteredValueRPot = analogRead(potRPin);
-  int filteredValueLPot = analogRead(potLPin);
+  int rightBarrelPosition = rightEncoder.getAngle();
+  int leftBarrelPosition = leftEncoder.getAngle();
 
   //Logging
-  Serial.print("Current Value R Pot ");
-  Serial.println(filteredValueRPot);
-  Serial.print("Current Value L Pot ");
-  Serial.println(filteredValueLPot);
+  
+  Serial.print("Current Value R Barrel ");
+  Serial.println(rightBarrelPosition);
+  Serial.print("Current Value L Barrel ");
+  Serial.println(leftBarrelPosition);
 
-  Serial.print("Destination Value R Pot ");
+  Serial.print("Destination Value R Barrel ");
   Serial.println(gearSettings[newGear][RIGHT]);
-  Serial.print("Destination Value L Pot ");
+  Serial.print("Destination Value L Barrel ");
   Serial.println(gearSettings[newGear][LEFT]);
 
   int stepperRRotationDirection = 1;
   int stepperLRotationDirection = 1;
 
   unsigned long timer = micros();
-
-  //Right barrel roation direction
-  if (gearSettings[newGear][RIGHT] < filteredValueRPot)
+  
+  //Set barrel roation direction
+  if (newGear > currentGear)
   {
     stepperRRotationDirection = CCW;
-  }
-  else
-  {
-    stepperRRotationDirection = CW;
-  }
-
-  //Left barrel rotation direction
-  if (gearSettings[newGear][LEFT] > filteredValueLPot)
-  {
     stepperLRotationDirection = CW;
   }
   else
   {
+    stepperRRotationDirection = CW;
     stepperLRotationDirection = CCW;
   }
 
@@ -519,7 +502,6 @@ int ShiftGears(int newGear, int currentGear)
   EnableDisableSteppers(true);
 
   //Cut Throttle via to release sliders from dogs
-
   speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
   ledcWrite(pwmChannel, speedControlPWM);
 
@@ -530,10 +512,10 @@ int ShiftGears(int newGear, int currentGear)
   {
     //Left then right barrels
     Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-    if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], false))
+    if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false))
     {
       //Rev Match code goes here
-      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], true);
+      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true);
       if (!shiftComplete)
       {
         Serial.println("Error with Right Barrel");
@@ -549,9 +531,9 @@ int ShiftGears(int newGear, int currentGear)
   {
     Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
     //Right then left barrels
-    if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], false))
+    if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false))
     {
-      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], true);
+      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true);
       if (!shiftComplete)
       {
         engineRunning = false;
@@ -568,9 +550,9 @@ int ShiftGears(int newGear, int currentGear)
   {
     Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
     //Right then left barrels
-    if (moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], false))
+    if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false))
     {
-      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], true);
+      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true);
       if (!shiftComplete)
       {
         Serial.println("Error with Left Barrel");
@@ -586,9 +568,9 @@ int ShiftGears(int newGear, int currentGear)
   {
     //Left then right barrels
     Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-    if (moveBarrel(stepperL, stepperLRotationDirection, potLPin, gearSettings[newGear][LEFT], false))
+    if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false))
     {
-      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, potRPin, gearSettings[newGear][RIGHT], true);
+      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true);
       if (!shiftComplete)
       {
         Serial.println("Error with Right Barrel");
@@ -624,14 +606,15 @@ int ShiftGears(int newGear, int currentGear)
 //**********************************************************************
 //  Move Barrel
 //**********************************************************************
-bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int destinationPotValue, bool isEngagingGear)
+bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int destinationPosition, bool isEngagingGear)
 {
-  int filteredPotValue = analogRead(potPin);
+  int barrelPosition = encoder.getAngle();
+
   stepper.setSpeed(stepperAccelTable[0] * rotationDirection); //Set initial speed and direction of stepper
 
-  int startPosition = filteredPotValue;
-  int extent = abs(startPosition - destinationPotValue);
-  int beginDecelExtent = extent * 0.08;
+  int startPosition = barrelPosition;
+  int extent = abs(startPosition - destinationPosition);
+  int beginDecelExtent = extent * 0.01;
   bool isDecelerating = false;
 
   //Set the reached destination boolean, barrel maybe already in destination position
@@ -646,26 +629,16 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, int potPin, int des
   //Run this loop until the pot value is within the threshold value for the target gear
   while (!reachedDestination)
   {
-    filteredPotValue = FilterValue(analogRead(potPin), filteredPotValue, 0.9f);
+    barrelPosition = encoder.getAngle();
 
     //Calculate how far we have to go to the destination
-    extent = abs(filteredPotValue - destinationPotValue);
+    extent = abs(barrelPosition - destinationPosition);
     reachedDestination = extent <= gearValueThreshold;
 
     //Check to see if we've reached the destination, if so just break out and return true;
     if (reachedDestination)
     {
       reachedDestination = true;
-      break;
-    }
-
-    //Safety to prevent damage to pots which has happened
-    if (filteredPotValue > 4090 || filteredPotValue < 0)
-    {
-      Serial.println("-------------POT VALUE EXCEEDED BOUNDS-----------------");
-      Serial.print("Filtered Value that Exceeded Bounds: ");
-      Serial.println(filteredPotValue);
-      reachedDestination = false;
       break;
     }
 
@@ -754,28 +727,34 @@ void RevMatch(int currentGear, int newGear)
 //**********************************************************************
 //  Learn pot values for each gear
 //**********************************************************************
-void LearnGear(int gear)
+void LearnGear()
 {
-  int filteredValueRPot = analogRead(potRPin);
-  int filteredValueLPot = analogRead(potLPin);
+  int rightValue = rightEncoder.getAngle();
+  int leftValue = leftEncoder.getAngle();
 
-  //Read pot value and run thru the filter function x times to eliminate jitter
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < 8; i++)
   {
-    filteredValueRPot = FilterValue(analogRead(potRPin), filteredValueRPot, 0.6f);
-    filteredValueLPot = FilterValue(analogRead(potLPin), filteredValueLPot, 0.6f);
-    delay(1);
+    if (rightValue + (i * -455) > 0)
+    {
+      gearSettings[i][RIGHT] = rightValue + (i * -455);
+    }
+    else
+    {
+      //Account for going past 0 
+      gearSettings[i][RIGHT] = (rightValue + (i * -455)) + 4095;
+    }
+    if (leftValue + (i * 455) < 4095)
+    {
+      gearSettings[i][LEFT] = leftValue + (i * 455);
+    }
+    else
+    {
+      //Account for going past 4095 
+      gearSettings[i][leftValue] = (leftValue + (i * 455)) - 4095;
+    }
   }
-
-  //store filtered value into the array
-  gearSettings[gear][RIGHT] = filteredValueRPot;
-  gearSettings[gear][LEFT] = filteredValueLPot;
-
-  Serial.println("Stored Values");
-  Serial.print("R Pot");
-  Serial.println(gearSettings[gear][RIGHT]);
-  Serial.print("L Pot");
-  Serial.println(gearSettings[gear][LEFT]);
+  //Save values to eeprom
+  StoreGearSettings();
 }
 
 //**********************************************************************

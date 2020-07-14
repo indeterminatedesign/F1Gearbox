@@ -78,8 +78,6 @@ const int startRPM = 800;
 SX1509 sevsegLeft;
 SX1509 sevsegRight;
 
-bool learnMode = false;
-
 float percentThrottle = 0;
 
 // Define variables to store incoming readings
@@ -103,9 +101,7 @@ typedef struct struct_message
 const int NoAction = 0;
 const int Upshift = 1;
 const int Downshift = 2;
-const int BeginLearnMode = 3;
 const int StoreValues = 4;
-const int EndLearnMode = 5;
 const int StartStopEngine = 6;
 const int Error = 9;
 
@@ -271,35 +267,23 @@ void ProcessIncomingGearboxData()
 //**********************************************************************
 void LearningMode()
 {
-  //Tell the Gearbox we are beginning learning
-  SendGearboxData(BeginLearnMode);
-  //Turn on Decimal Point to indicator learning mode is active
+   //Turn on Decimal Point to indicator learning mode is active
   sevsegRight.analogWrite(15, 255);
 
   GearIndicator(9);
   delay(1000);
-  GearIndicator(0);
-
-  int currentGear = 0;
-  while (currentGear <= 7)
-  {
     //If Button 1 is pressed, store the current value for gear x
     if (PollButton(button1Pin, button1BounceState, button1PreviousState, previousButton1Micros))
     {
-      message.currentGear = currentGear;
-      SendGearboxData(StoreValues);
-      currentGear++;
-      GearIndicator(currentGear);
-      ButtonIndicator();
-      //TODO: Update the gear number being DISPLAYED
+       SendGearboxData(StoreValues);
     }
-  }
-  SendGearboxData(EndLearnMode);
+ 
   ButtonIndicator();
   ButtonIndicator();
   ButtonIndicator();
   //Turn off Decimal point
   sevsegRight.analogWrite(15, 255);
+  GearIndicator(incomingCurrentGear);
 }
 
 //**********************************************************************

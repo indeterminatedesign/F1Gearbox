@@ -3,6 +3,12 @@
   Created by Kane C. Stoboi, 22 August, 2018.
   Released into the public domain.
 */
+/*
+  AS5600.h - Library for interacting with the AS5600.
+  Modified by Indeterminate Design July 14, 2020 To Add Functionality to accept multiple wire interfaces
+  (AS5600 only has 1 I2C address available)
+  Released into the public domain.
+*/
 
 #ifndef AS5600_h
 #define AS5600_h
