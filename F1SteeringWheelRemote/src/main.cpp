@@ -271,12 +271,15 @@ void LearningMode()
   sevsegRight.analogWrite(15, 255);
 
   GearIndicator(9);
-  delay(1000);
+while(1)
+{    
     //If Button 1 is pressed, store the current value for gear x
     if (PollButton(button1Pin, button1BounceState, button1PreviousState, previousButton1Micros))
     {
        SendGearboxData(StoreValues);
+       break;
     }
+}
  
   ButtonIndicator();
   ButtonIndicator();

@@ -21,7 +21,7 @@ class AS5600
   public:
     AS5600();
     AS5600(int sclPin, int sdaPin);
-    long getPosition();
+    word getPosition();
     int getAngle();
     int getStatus();
     int getGain();
@@ -52,11 +52,11 @@ class AS5600
       byte _BURNAddress = 0xFF;
 
       TwoWire myWire = Wire;
-      long _msb;
-      long _lsb;
+      int _msb;
+      int _lsb;
       long _msbMask = 0b00001111;
 
-      long _getRegisters2(byte registerMSB, byte registerLSB);
+      word _getRegisters2(byte registerMSB, byte registerLSB);
       int _getRegister(byte register1);
 };
 

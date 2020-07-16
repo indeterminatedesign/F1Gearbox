@@ -11,13 +11,11 @@
 
 //Define all the pins
 const int stepperLPin = 23;      //Step pin
-const int stepperLDirPin = 22;   // Direction Pin
+const int stepperLDirPin = 17;   // Direction Pin
 const int stepperLSleepPin = 2;  // Sleep driver pin
-const int stepperRPin = 21;      //Step pin
+const int stepperRPin = 16;      //Step pin
 const int stepperRDirPin = 19;   // Direction Pin
 const int stepperRSleepPin = 15; // Sleep driver pin
-const int potRPin = 35;          //Right side pot pin
-const int potLPin = 34;          //Left side pot pin
 const int escPin = 12;           //Speed controller pin
 const int mainRPMPin = 5;        //Pin for interupt of the mainshaft photo sensor
 const int layRPMPin = 18;        //Pin for interupt of the layshaft photo sensor
@@ -262,7 +260,7 @@ void setup()
   //Initialize Wifi
   initializeWifi();
 
-  // configure LED PWM functionalitites
+  // configure PWM functionalitites
   ledcSetup(pwmChannel, freq, resolution);
 
   // attach the channel to the GPIO to be controlled
@@ -293,7 +291,7 @@ void setup()
   LoadGearSettings();
 
   //Check shift drums and pots for any issues
-  //Diagnostics();
+ Diagnostics();
 
   //PopulatePWMLookup();
 }
@@ -384,15 +382,17 @@ void ProcessIncomingRemoteData()
   Serial.print("Percent Throttle");
   Serial.println(incomingPercentThrottle);
    */
-  //Serial.print("Incoming Action: ");
-  //Serial.println(incomingAction);
+  /*
+  Serial.print("Incoming Action: ");
+  Serial.println(incomingAction);
+  */
   if (actionFlag)
   {
     switch (incomingAction)
     {
     case NoAction:
       //############################################
-      percentThrottle = incomingPercentThrottle;
+      //percentThrottle = incomingPercentThrottle;
       //Place code here to process throttle and calculate target RPM
       //Call Vehicle Simulation
       break;
@@ -401,12 +401,13 @@ void ProcessIncomingRemoteData()
       //TODO Lower revs of motor based on new gear ratio
       break;
     case Downshift:
-      currentGear = ShiftGears(currentGear - 1, currentGear);
+     currentGear = ShiftGears(currentGear - 1, currentGear);
       //TODO: Up revs of motor based on new gear ratio
       break;
     case StoreValues:
       //Call learn gears to store the current gear's shift drum positions
       LearnGear();
+      Serial.println("Start Learn Gear");
       break;
     case StartStopEngine:
       //If the engine isn't running start it up, otherwise turn it off
@@ -466,11 +467,11 @@ int ShiftGears(int newGear, int currentGear)
 
   bool shiftComplete = false;
 
-  int rightBarrelPosition = rightEncoder.getAngle();
-  int leftBarrelPosition = leftEncoder.getAngle();
+  int rightBarrelPosition = rightEncoder.getPosition();
+  int leftBarrelPosition = leftEncoder.getPosition();
 
   //Logging
-  
+
   Serial.print("Current Value R Barrel ");
   Serial.println(rightBarrelPosition);
   Serial.print("Current Value L Barrel ");
@@ -485,7 +486,7 @@ int ShiftGears(int newGear, int currentGear)
   int stepperLRotationDirection = 1;
 
   unsigned long timer = micros();
-  
+
   //Set barrel roation direction
   if (newGear > currentGear)
   {
@@ -502,9 +503,11 @@ int ShiftGears(int newGear, int currentGear)
   EnableDisableSteppers(true);
 
   //Cut Throttle via to release sliders from dogs
+  if(engineRunning)
+{
   speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
   ledcWrite(pwmChannel, speedControlPWM);
-
+}
   //Determine which barrel to move first
 
   //Upshift and left barrel is marked first
@@ -608,7 +611,7 @@ int ShiftGears(int newGear, int currentGear)
 //**********************************************************************
 bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int destinationPosition, bool isEngagingGear)
 {
-  int barrelPosition = encoder.getAngle();
+  int barrelPosition = encoder.getPosition();
 
   stepper.setSpeed(stepperAccelTable[0] * rotationDirection); //Set initial speed and direction of stepper
 
@@ -629,7 +632,7 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
   //Run this loop until the pot value is within the threshold value for the target gear
   while (!reachedDestination)
   {
-    barrelPosition = encoder.getAngle();
+    barrelPosition = encoder.getPosition();
 
     //Calculate how far we have to go to the destination
     extent = abs(barrelPosition - destinationPosition);
@@ -725,33 +728,42 @@ void RevMatch(int currentGear, int newGear)
 }
 
 //**********************************************************************
-//  Learn pot values for each gear
+//  Learn zero offset for neutral
 //**********************************************************************
 void LearnGear()
 {
-  int rightValue = rightEncoder.getAngle();
-  int leftValue = leftEncoder.getAngle();
-
-  for (int i = 0; i < 8; i++)
+  int rightValue = rightEncoder.getPosition();
+  int leftValue = leftEncoder.getPosition();
+  
+  for (int i = 0; i<= 7; i++)
   {
-    if (rightValue + (i * -455) > 0)
+    if (rightValue + (i * 455) < 4095)
     {
-      gearSettings[i][RIGHT] = rightValue + (i * -455);
+      gearSettings[i][RIGHT] = rightValue + (i * 455);
     }
     else
     {
-      //Account for going past 0 
-      gearSettings[i][RIGHT] = (rightValue + (i * -455)) + 4095;
+      //Account for going past 4095
+      gearSettings[i][RIGHT] = (rightValue + (i * 455)) - 4095;
     }
-    if (leftValue + (i * 455) < 4095)
+    if (i > 1)
     {
-      gearSettings[i][LEFT] = leftValue + (i * 455);
+    if (leftValue + ((i-1) * -455) > 0)
+    {
+        gearSettings[i][LEFT] = leftValue + ((i-1) * -455);
     }
     else
     {
-      //Account for going past 4095 
-      gearSettings[i][leftValue] = (leftValue + (i * 455)) - 4095;
+      //Account for going below 0
+      gearSettings[i][leftValue] = (leftValue + ((i-1) * -455)) + 4095;
     }
+    }
+    else
+    {
+      //Left Barrel Does not move to upshift into first gear, or to downshift into neutral
+      gearSettings[1][LEFT] = leftValue;
+    }
+    
   }
   //Save values to eeprom
   StoreGearSettings();
@@ -977,8 +989,19 @@ void StoreGearSettings()
 //**********************************************************************
 void Diagnostics()
 {
-  int initialRPotValue = analogRead(potRPin);
-  int initialLPotValue = analogRead(potLPin);
+  /*
+  while (1)
+  {
+    Serial.print("Right Encoder");
+    Serial.println(rightEncoder.getPosition());
+    Serial.print("Left Encoder");
+    Serial.println(leftEncoder.getPosition());
+    delay(500);
+  }
+  */
+
+  int initialRPositionValue = rightEncoder.getPosition();
+  int initialLPositionValue = leftEncoder.getPosition();
   int RTestPos = 10 * CCW;
   int LTestPos = 10 * CW;
   stepperR.setSpeed(startingStepperSpeed * CCW);
@@ -991,14 +1014,13 @@ void Diagnostics()
   /*
   while(1)
   {
-         Serial.print("Intial R Value: ");
-      Serial.println(initialRPotValue);
+      Serial.print("Intial R Value: ");
+      Serial.println(initialRPositionValue);
       Serial.print("Intial L Value: ");
-      Serial.println(initialLPotValue); 
+      Serial.println(initialLPositionValue); 
       delay(1000);
   }
   */
-
   Serial.println("********************************************************************");
   Serial.println("Begin Diagnostics");
   Serial.println("********************************************************************");
@@ -1011,31 +1033,31 @@ void Diagnostics()
     passedRTest = false;
     passedLTest = false;
 
-    //Check if one of the pots is reading too close to a limit to get an accurate position reading
-    if (initialRPotValue > 4085 || initialRPotValue < 10 || initialLPotValue > 4085 || initialLPotValue < 10)
+    //Check if one of the Positions is reading too close to a limit to get an accurate position reading
+    if (initialRPositionValue > 4085 || initialRPositionValue < 10 || initialLPositionValue > 4085 || initialLPositionValue < 10)
     {
-      Serial.println("Failed: A pot value is too close to a limit of either 0 or 4095, re-index the pot to the shift barrel");
+      Serial.println("Failed: A Position value is too close to a limit of either 0 or 4095, re-index the Position to the shift barrel");
       Serial.print("Intial R Value: ");
-      Serial.println(initialRPotValue);
+      Serial.println(initialRPositionValue);
       Serial.print("Intial L Value: ");
-      Serial.println(initialLPotValue);
+      Serial.println(initialLPositionValue);
     }
     //****************************
     //Test Right
     stepperR.setCurrentPosition(0);
     stepperR.runToNewPosition(RTestPos); //Rotate CCW
-    int currentRPotValue = analogRead(potRPin);
+    int currentRPositionValue = rightEncoder.getPosition();
     stepperR.runToNewPosition(0);
-    if (currentRPotValue < initialRPotValue)
+    if (currentRPositionValue > initialRPositionValue)
     {
       Serial.println("Passed: Right Barrel is Correct");
       passedRTest = true;
     }
     else
     {
-      if (abs(currentRPotValue - initialRPotValue) > gearValueThreshold)
+      if (abs(currentRPositionValue - initialRPositionValue) > gearValueThreshold)
       {
-        Serial.println("Failed: Right Pot not reading correctly, or L & R are swapped");
+        Serial.println("Failed: Right Position not reading correctly, or L & R are swapped");
       }
       else
       {
@@ -1044,27 +1066,27 @@ void Diagnostics()
     }
 
     Serial.print("Intial R Value: ");
-    Serial.println(initialRPotValue);
+    Serial.println(initialRPositionValue);
 
     Serial.print("Test R Value: ");
-    Serial.println(currentRPotValue);
+    Serial.println(currentRPositionValue);
 
     //****************************
     //Test Left
     stepperL.setCurrentPosition(0);
     stepperL.runToNewPosition(LTestPos);
-    int currentLPotValue = analogRead(potLPin);
+    int currentLPositionValue = leftEncoder.getPosition();
     stepperL.runToNewPosition(0);
-    if (currentLPotValue > initialLPotValue) //Rotate CW
+    if (currentLPositionValue < initialLPositionValue) //Rotate CW
     {
       Serial.println("Passed: Left Barrel is Correct");
       passedLTest = true;
     }
     else
     {
-      if (abs(currentLPotValue - initialLPotValue) > gearValueThreshold)
+      if (abs(currentLPositionValue - initialLPositionValue) > gearValueThreshold)
       {
-        Serial.println("Failed:  Left Pot not reading correctly, or L & R are swapped");
+        Serial.println("Failed:  Left Position not reading correctly, or L & R are swapped");
       }
       else
       {
@@ -1072,10 +1094,10 @@ void Diagnostics()
       }
     }
     Serial.print("Intial L Value: ");
-    Serial.println(initialLPotValue);
+    Serial.println(initialLPositionValue);
 
     Serial.print("Test L Value: ");
-    Serial.println(currentLPotValue);
+    Serial.println(currentLPositionValue);
 
     //Disable steppers
     digitalWrite(stepperRSleepPin, LOW);
@@ -1083,6 +1105,7 @@ void Diagnostics()
 
     delay(1000);
   }
+
 }
 
 void PopulatePWMLookup()
