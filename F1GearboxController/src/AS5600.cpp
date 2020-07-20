@@ -7,24 +7,133 @@
 
 AS5600::AS5600()
 {
-	//set up AS5600
-	myWire.begin();
+	_wire = &Wire;
+	_wire->begin();
+	_wire->setClock(400000);
 }
-AS5600::AS5600(int sclPin, int sdaPin)
+AS5600::AS5600(TwoWire *the_wire, int sda, int scl)
 {
-	myWire = Wire1;
-	myWire.begin(sdaPin, sclPin);
+	_wire = the_wire;
+	_wire->begin(sda, scl);
+	_wire->setClock(400000);
 }
-word AS5600::getPosition()
+bool AS5600::i2cdelay(int size)
 {
-	return _getRegisters2(_RAWANGLEAddressMSB, _RAWANGLEAddressLSB);
+	int i = 0;
+	for (; _wire->available() < size && i <= size; i++)
+	{
+		delay(2);
+	}
+	if (i >= size)
+	{
+		return false;
+	}
+	else
+	{
+		return true;
+	}
+}
+int AS5600::getState()
+{ //-1:no data, 0:err, 1:ok
+	_wire->requestFrom(_AS5600Address, (uint8_t)1);
+	if (i2cdelay(1))
+	{
+		return _wire->read();
+	}
+	else
+	{
+		return -1;
+	}
+}
+
+long AS5600::getVal(byte reg)
+{
+	_wire->beginTransmission(_AS5600Address); // transmit to device
+	_wire->write(reg);						  // sends one byte
+	_wire->endTransmission();				  // stop transmitting
+
+	_wire->requestFrom(_AS5600Address, (uint8_t)2);
+	int16_t ret = 0;
+	if (i2cdelay(2))
+	{
+		byte *pointer = (byte *)&ret;
+		pointer[0] = _wire->read();
+		pointer[1] = _wire->read();
+	}
+	return ret;
+}
+
+long AS5600::getVal2(byte registerMSB, byte registerLSB)
+{
+	_lsb = 0;
+	_msb = 0;
+	long retVal = -1;
+	_wire->beginTransmission(_AS5600Address); // transmit to device
+	_wire->write(registerLSB);				  // sends one byte
+	_wire->endTransmission();				  // stop transmitting
+	delayMicroseconds(10);
+
+	_wire->requestFrom(_AS5600Address, 1);
+	if (_wire->available() <= 1)
+	{
+		_lsb = _wire->read();
+	}
+	/*
+	if (i2cdelay(2))
+	{
+		_lsb = _wire->read();
+	}
+*/
+	_wire->beginTransmission(_AS5600Address); // transmit to device
+	_wire->write(registerMSB);				  // sends one byte
+	_wire->endTransmission();				  // stop transmitting
+
+	_wire->requestFrom(_AS5600Address, 1);
+
+	if (_wire->available() <= 1)
+	{
+		_msb = _wire->read();
+	}
+	/*
+	if (i2cdelay(2))
+	{
+		_msb = _wire->read();
+	}
+	*/
+	retVal = (_lsb) + (_msb & _msbMask) * 256;
+	return retVal;
+}
+
+unsigned int AS5600::getPosition()
+{
+
+	return getVal2(_RAWANGLEAddressMSB, _RAWANGLEAddressLSB);
 }
 
 int AS5600::getAngle()
 {
-	return _getRegisters2(_ANGLEAddressMSB, _ANGLEAddressLSB);
+	return getVal2(_ANGLEAddressMSB, _ANGLEAddressLSB);
 }
+/*
+int16_t AS5600::getVal2(byte registerMSB, byte registerLSB)
+{
 
+	_wire->beginTransmission(_AS5600Address); // transmit to device
+	_wire->write(registerMSB);				  // sends one byte
+	_wire->endTransmission();				  // stop transmitting
+	delay(10);
+
+	_wire->requestFrom(_AS5600Address, (uint8_t)2);
+	int16_t ret = 0;
+	if (i2cdelay(2))
+	{
+		byte *pointer = (byte *)&ret;
+		pointer[0] = _wire->read();
+		pointer[1] = _wire->read();
+	}
+	Serial.println(ret);
+	return ret;
+}
 int AS5600::getStatus()
 {
 	return _getRegister(_STATUSAddress) & 0b00111000;
@@ -39,47 +148,58 @@ int AS5600::getMagnitude()
 {
 	return _getRegisters2(_MAGNITUDEAddressMSB, _MAGNITUDEAddressLSB);
 }
-
+/*
 int AS5600::_getRegister(byte register1)
 {
-	myWire.beginTransmission(_AS5600Address);
-	myWire.write(register1);
-	myWire.endTransmission();
+	Serial.println("Entered get registers");
 
-	myWire.requestFrom(_AS5600Address, 1);
+	_wire.beginTransmission(_AS5600_AS5600Addressess);
+	_wire.write(register1);
+	_wire.endTransmission();
 
-	if (myWire.available() <= 1)
+	_wire.requestFrom(_AS5600_AS5600Addressess, 1);
+
+	if (_wire.available() <= 1)
 	{
-		_msb = myWire.read();
+		_msb = _wire.read();
 	}
 
 	return _msb;
 }
 
-word AS5600::_getRegisters2(byte registerMSB, byte registerLSB)
+long AS5600::_getRegisters2(byte registerMSB, byte registerLSB)
 {
-	word retVal = -1;
-	/* Read Low Byte */
-	myWire.beginTransmission(_AS5600Address);
-	myWire.write(registerLSB);
-	myWire.endTransmission();
-	myWire.requestFrom(_AS5600Address, 1);
-	if (myWire.available() <= 1)
-	{
-		_lsb = myWire.read();
-	}
-	/* Read High Byte */
-	myWire.beginTransmission(_AS5600Address);
-	myWire.write(registerMSB);
-	myWire.endTransmission();
-	myWire.requestFrom(_AS5600Address, 1);
+	Serial.println("Entered get registers2");
+	;
 
-	if (myWire.available() <= 1)
+	_lsb = 0;
+	_msb = 0;
+	long retVal = -1;
+	/* Read Low Byte 
+	_wire.beginTransmission(_AS5600_AS5600Addressess);
+	_wire.write(registerLSB);
+	_wire.endTransmission();
+	delay(10);
+
+	_wire.requestFrom(_AS5600_AS5600Addressess, 1);
+	if (_wire.available() <= 1)
 	{
-		_msb = myWire.read();
+		_lsb = _wire.read();
 	}
-	_msb = _msb << 8;
-	retVal = _msb | _lsb;
+	/* Read High Byte 
+	_wire.beginTransmission(_AS5600_AS5600Addressess);
+	_wire.write(registerMSB);
+	_wire.endTransmission();
+	_wire.requestFrom(_AS5600_AS5600Addressess, 1);
+
+	if (_wire.available() <= 1)
+	{
+		_msb = _wire.read();
+	}
+	retVal = (_lsb) + (_msb & _msbMask) * 256;
+
+	Serial.println(retVal);
 
 	return retVal;
 }
+*/
