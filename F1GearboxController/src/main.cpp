@@ -75,7 +75,7 @@ const float Kp = 0.6f;
 const float Ki = 0.15f; //0.15
 const float Kd = 0.0f;  //.15
 unsigned long previousMicros = 0;
-bool engineRunning = false;
+bool engineRunning = true;
 
 const int rpmDebounceInterval = 100;
 const long rpmUpdateInterval = 100000;
@@ -212,10 +212,10 @@ void RevMatch(int currentGear, int newGear);
 void PopulatePWMLookup();
 int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEncoderValue);
 
-    //**********************************************************************
-    // Callback when data is sent
-    //**********************************************************************
-    void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
+//**********************************************************************
+// Callback when data is sent
+//**********************************************************************
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
   //Serial.print("\r\nLast Packet Send Status:\t");
   //Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
@@ -324,7 +324,7 @@ void loop()
   {
     if (engineRunning)
     {
-      targetRPM = vehicle.Simulate(incomingPercentThrottle, layRpmFiltered, mainRpmFiltered, currentGear);
+      targetRPM = vehicle.Simulate(incomingPercentThrottle, layRpmFiltered, currentGear);
     }
     else
     {
@@ -505,10 +505,10 @@ int ShiftGears(int newGear, int currentGear)
     {
       //Left then right barrels
       Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-      if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT],false, false))
+      if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false, false))
       {
         //Rev Match code goes here
-        shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT],true, true);
+        shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true, true);
         if (!shiftComplete)
         {
           Serial.println("Error with Right Barrel");
@@ -524,7 +524,7 @@ int ShiftGears(int newGear, int currentGear)
     {
       Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
       //Right then left barrels
-      if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT],true, false))
+      if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true, false))
       {
         shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false, true);
         if (!shiftComplete)
@@ -546,9 +546,9 @@ int ShiftGears(int newGear, int currentGear)
     {
       Serial.println("$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
       //Right then left barrels
-      if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT],false, false))
+      if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false, false))
       {
-        shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT],true, true);
+        shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true, true);
         if (!shiftComplete)
         {
           Serial.println("Error with Left Barrel");
@@ -564,9 +564,9 @@ int ShiftGears(int newGear, int currentGear)
     {
       //Left then right barrels
       Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-      if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT],true, false))
+      if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true, false))
       {
-        shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT],false, true);
+        shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false, true);
         if (!shiftComplete)
         {
           Serial.println("Error with Right Barrel");
@@ -603,21 +603,23 @@ int ShiftGears(int newGear, int currentGear)
 //**********************************************************************
 //  Move Barrel
 //**********************************************************************
-bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int destinationPosition,bool isIncreasingEncoderValue, bool isEngagingGear)
+bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int destinationPosition, bool isIncreasingEncoderValue, bool isEngagingGear)
 {
-  int barrelPosition = encoder.getPosition();
+  int currentPosition = encoder.getPosition();
   stepper.setSpeed(stepperAccelTable[0] * rotationDirection); //Set initial speed and direction of stepper
-  int extent = FindExtent(barrelPosition, destinationPosition,isIncreasingEncoderValue);
+  
+  int extent = FindExtent(currentPosition, destinationPosition, isIncreasingEncoderValue);
+  //Set the reached destination boolean, barrel maybe already in destination position
+  bool reachedDestination = abs(extent) <= gearValueThreshold;
 
-  Serial.print("Initial Extent: ");
-  Serial.println(extent);
   Serial.print("Initial Position: ");
-  Serial.println(barrelPosition);
+  Serial.println(currentPosition);
   Serial.print("Destination Position: ");
   Serial.println(destinationPosition);
-
-  //Set the reached destination boolean, barrel maybe already in destination position
-  bool reachedDestination = extent <= gearValueThreshold;
+  Serial.print("Initial Extent: ");
+  Serial.println(extent);
+  Serial.print("isIncreaseing: ");
+  Serial.println(isIncreasingEncoderValue);
 
   // Actual true number of steps taken
   int stepCount = 0;
@@ -647,11 +649,11 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
     }
     else
     {
-      barrelPosition = encoder.getPosition();
+      currentPosition = encoder.getPosition();
       //Calculate how far we have to go to the destination
-      FindExtent(barrelPosition, destinationPosition, isIncreasingEncoderValue);
+      extent = FindExtent(currentPosition, destinationPosition, isIncreasingEncoderValue);
       stepper.move(extent * .205 * rotationDirection);
-      reachedDestination = extent <= gearValueThreshold;
+      reachedDestination = abs(extent) <= gearValueThreshold;
     }
   }
 
@@ -659,7 +661,7 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
   Serial.print("Final Extent: ");
   Serial.println(extent);
   Serial.print("Final Position: ");
-  Serial.println(barrelPosition);
+  Serial.println(currentPosition);
   Serial.print("Step Count: ");
   Serial.println(stepCount);
 
@@ -678,31 +680,27 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
 //**********************************************************************
 int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEncoderValue)
 {
-  int extent = destinationPosition - currentPosition;
-  if(isIncreasingEncoderValue)
+  //Always assume we want the shortest path to the destination
+  //Can return negative values
+  int extent = 0;
+  int reverseExtent = 0;
+
+  extent = (0 - currentPosition + destinationPosition) * (!isIncreasingEncoderValue?-1:1);
+  reverseExtent = (4095 - currentPosition + destinationPosition) * (isIncreasingEncoderValue?1:-1);
+ 
+  Serial.print("extent: ");
+  Serial.println(extent);
+  Serial.print("reverse extent: ");
+  Serial.println(reverseExtent);
+
+  if (abs(extent) < abs(reverseExtent))
   {
-  if (currentPosition > destinationPosition)
-    {
-      extent = 4095 - currentPosition + destinationPosition;
-    }
-    else
-    {
-     extent = destinationPosition - currentPosition;
-    }
+    return extent;
   }
   else
   {
-    if (currentPosition < destinationPosition)
-    {
-      extent = 4095 - destinationPosition + currentPosition;
-    }
-    else
-    {
-      extent = currentPosition - destinationPosition;
-    }
+    return reverseExtent;
   }
-
-  return extent;
 }
 
 //**********************************************************************
@@ -710,7 +708,7 @@ int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEn
 //**********************************************************************
 void RevMatch(int currentGear, int newGear)
 {
-  float revRatio = vehicle.RevMatch(currentGear, newGear);
+  float revRatio = vehicle.RevMatch(currentGear, newGear, layRpm);
 
   //Use the target RPM not the current RPM because of the throttle cut
   targetRPM = targetRPM * revRatio;
@@ -1007,6 +1005,7 @@ void Diagnostics()
   }
 
   EnableDisableSteppers(false);
+
   while (1)
   {
     Serial.print("Right Encoder");
@@ -1117,55 +1116,7 @@ void Diagnostics()
     Serial.println(currentLPositionValue);
 
     //Disable steppers
-    digitalWrite(stepperRSleepPin, LOW);
-    digitalWrite(stepperLSleepPin, LOW);
+    EnableDisableSteppers(false);
 
-    delay(1000);
-  }
-}
-
-void PopulatePWMLookup()
-{
-  const int rpmIncriment = 25;
-  Serial.println("RPM,Gear");
-  for (int i = 0; i < 18; i++)
-  {
-    int lookupTargetRPM = i * rpmIncriment + 350;
-    Serial.print("Target RPM: ");
-    Serial.println(lookupTargetRPM);
-
-    bool recordedValue = false;
-    const int numSamples = 5;
-    int pwmSum = 0;
-    int sampleCount = 0;
-
-    while (!recordedValue)
-    {
-      //Count Pulses with Debouncing
-      CountPulses(mainRPMPin, mainBounceState, mainPreviousRPMSensorState, mainPreviousMicros, mainPulseCount);
-      CountPulses(layRPMPin, layBounceState, layPreviousRPMSensorState, layPreviousMicros, layPulseCount);
-
-      if (ComputeRPMOnInterval(rpmUpdateInterval)) //If the RPM value has been refreshed, control the motor's speed based on new value
-      {
-        ControlMotorSpeed(lookupTargetRPM);
-      }
-      if (abs(layRpmFiltered - lookupTargetRPM) < 15)
-      {
-        pwmSum += speedControlPWM;
-        sampleCount++;
-        delayMicroseconds(50000);
-      }
-      if (sampleCount > 4)
-      {
-        //Store RPM
-        pwmLookupByRPM[i][0] = lookupTargetRPM;
-        //Store Average PWM value into table
-        pwmLookupByRPM[i][1] = pwmSum / numSamples;
-        recordedValue = true;
-      }
-    }
-    Serial.print(pwmLookupByRPM[i][0]);
-    Serial.print(",");
-    Serial.println(pwmLookupByRPM[i][1]);
   }
 }
