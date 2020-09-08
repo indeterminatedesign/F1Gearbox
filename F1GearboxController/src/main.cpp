@@ -19,7 +19,7 @@ const int stepperRSleepPin = 15; // Sleep driver pin
 const int escPin = 12;           //Speed controller pin
 const int mainRPMPin = 5;        //Pin for interupt of the mainshaft photo sensor
 const int layRPMPin = 18;        //Pin for interupt of the layshaft photo sensor
-const int acceleratorPin = 0;    //Pin for input from a 10k pot representing accelerator
+const int acceleratorPin = 36;   //Pin for input from a 10k pot representing accelerator
 const int sda2Pin = 33;
 const int scl2Pin = 32;
 
@@ -45,6 +45,10 @@ const int CCW = -1;
 #define IGNORE_SENSOR false
 #define LEFT 0
 #define RIGHT 1
+
+//Min/Max pot value for accelerator pedal
+const int minThrottle = 3195;
+const int maxThrottle = 1206;
 
 //PWM Speed Control Variables
 const int freq = 20000;
@@ -73,7 +77,7 @@ float integral = 0;
 unsigned long previousMotorSpeedControlMicros = 0;
 const float Kp = 0.6f;
 const float Ki = 0.15f; //0.15
-const float Kd = 0.0f;  //.15
+const float Kd = 0.02f; //.15
 unsigned long previousMicros = 0;
 bool engineRunning = true;
 
@@ -96,7 +100,7 @@ int incomingCurrentGear; //Used only for learning purposes
 unsigned long previousUpdateRemoteDataMicros = 0;
 unsigned long previousProcessIncomingRemoteMicros = 0;
 const long updateRemoteDataInterval = 50000;
-const long processIncomingRemoteDataInterval = 10000;
+const long processIncomingRemoteDataInterval = 25000;
 
 // Variable to store if sending data was successful
 String success;
@@ -148,47 +152,7 @@ int gearSettings[8][4] =
 };
 
 const int stepperCamPoint = 11;
-const int startingStepperSpeed = 400; //Used by diagnostics function only
-const int stepperAccelTable[30]{
-    450,
-    557,
-    654,
-    732,
-    793,
-    838,
-    872,
-    897,
-    916,
-    930,
-    941,
-    950,
-    957,
-    963,
-    967,
-    971,
-    974,
-    977,
-    979,
-    981,
-    983,
-    985,
-    986,
-    987,
-    988,
-    989,
-    990,
-    990,
-    991,
-    992};
-
-const int stepperDecelTable[6]{
-    981,
-    791,
-    642,
-    533,
-    454,
-    400};
-
+const int startingStepperSpeed = 500; //Used by diagnostics function only
 int pwmLookupByRPM[18][2];
 
 //Function Declarations
@@ -208,7 +172,6 @@ void SendRemoteData();
 void ProcessIncomingRemoteData();
 void ProcessIncomingRemoteDataOnInterval();
 void EnableDisableSteppers(bool state);
-void RevMatch(int currentGear, int newGear);
 void PopulatePWMLookup();
 int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEncoderValue);
 
@@ -217,8 +180,8 @@ int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEn
 //**********************************************************************
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-  //Serial.print("\r\nLast Packet Send Status:\t");
-  //Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
   if (status == 0)
   {
     success = "Delivery Success :)";
@@ -241,9 +204,16 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
   //Flag that an action has occured and must be processed, stop loading data from remote until action has been handled
   if (!actionFlag)
   {
-    incomingPercentThrottle = incomingMessage.percentThrottle;
-    incomingCurrentGear = incomingMessage.currentGear;
-    incomingAction = incomingMessage.action;
+    if (incomingMessage.percentThrottle > 0)
+    {
+      incomingPercentThrottle = incomingMessage.percentThrottle;
+    }
+    else
+    {
+      incomingCurrentGear = incomingMessage.currentGear;
+      incomingAction = incomingMessage.action;
+    }
+
     if (incomingAction != NoAction)
     {
       actionFlag = true;
@@ -292,7 +262,7 @@ void setup()
   LoadGearSettings();
 
   //Check shift drums and pots for any issues
-  Diagnostics();
+  // Diagnostics();
 
   //PopulatePWMLookup();
 }
@@ -301,7 +271,6 @@ void setup()
 //**********************************************************************
 void loop()
 {
-
   //Don't take in remote data until the action that was recieved is executed
   if (!actionFlag)
   {
@@ -324,7 +293,9 @@ void loop()
   {
     if (engineRunning)
     {
-      targetRPM = vehicle.Simulate(incomingPercentThrottle, layRpmFiltered, currentGear);
+      targetRPM = vehicle.Simulate(percentThrottle, layRpmFiltered, currentGear);
+      Serial.print("New Target RPM: ");
+      Serial.println(targetRPM);
     }
     else
     {
@@ -350,12 +321,34 @@ void SendRemoteData()
 
     if (result == ESP_OK)
     {
-      //Serial.println("Sent with success");
+      Serial.println("Success");
+    }
+    else if (result == ESP_ERR_ESPNOW_NOT_INIT)
+    {
+      // How did we get so far!!
+      Serial.println("ESPNOW not Init.");
+    }
+    else if (result == ESP_ERR_ESPNOW_ARG)
+    {
+      Serial.println("Invalid Argument");
+    }
+    else if (result == ESP_ERR_ESPNOW_INTERNAL)
+    {
+      Serial.println("Internal Error");
+    }
+    else if (result == ESP_ERR_ESPNOW_NO_MEM)
+    {
+      Serial.println("ESP_ERR_ESPNOW_NO_MEM");
+    }
+    else if (result == ESP_ERR_ESPNOW_NOT_FOUND)
+    {
+      Serial.println("Peer not found.");
     }
     else
     {
-      // Serial.println("Error sending the data");
+      Serial.println("Not sure what happened");
     }
+    delay(10);
 
     previousUpdateRemoteDataMicros = micros();
   }
@@ -378,11 +371,17 @@ void ProcessIncomingRemoteDataOnInterval()
 //**********************************************************************
 void ProcessIncomingRemoteData()
 {
-  /*
+
   Serial.println("INCOMING VALUES");
   Serial.print("Percent Throttle");
   Serial.println(incomingPercentThrottle);
-   */
+
+  percentThrottle = 0;
+  if (incomingPercentThrottle > 0)
+  {
+    percentThrottle = incomingPercentThrottle;
+  }
+
   /*
   Serial.print("Incoming Action: ");
   Serial.println(incomingAction);
@@ -508,6 +507,7 @@ int ShiftGears(int newGear, int currentGear)
       if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false, false))
       {
         //Rev Match code goes here
+        vehicle.RevMatch(currentGear, newGear, layRpm);
         shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true, true);
         if (!shiftComplete)
         {
@@ -526,6 +526,8 @@ int ShiftGears(int newGear, int currentGear)
       //Right then left barrels
       if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true, false))
       {
+        //Rev Match code goes here
+        vehicle.RevMatch(currentGear, newGear, layRpm);
         shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false, true);
         if (!shiftComplete)
         {
@@ -548,6 +550,8 @@ int ShiftGears(int newGear, int currentGear)
       //Right then left barrels
       if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false, false))
       {
+        //Rev Match code goes here
+        vehicle.RevMatch(currentGear, newGear, layRpm);
         shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true, true);
         if (!shiftComplete)
         {
@@ -566,6 +570,8 @@ int ShiftGears(int newGear, int currentGear)
       Serial.println("$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
       if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true, false))
       {
+        //Rev Match code goes here
+        vehicle.RevMatch(currentGear, newGear, layRpm);
         shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false, true);
         if (!shiftComplete)
         {
@@ -606,8 +612,8 @@ int ShiftGears(int newGear, int currentGear)
 bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int destinationPosition, bool isIncreasingEncoderValue, bool isEngagingGear)
 {
   int currentPosition = encoder.getPosition();
-  stepper.setSpeed(stepperAccelTable[0] * rotationDirection); //Set initial speed and direction of stepper
-  
+  stepper.setSpeed(startingStepperSpeed * rotationDirection); //Set initial speed and direction of stepper
+
   int extent = FindExtent(currentPosition, destinationPosition, isIncreasingEncoderValue);
   //Set the reached destination boolean, barrel maybe already in destination position
   bool reachedDestination = abs(extent) <= gearValueThreshold;
@@ -634,18 +640,6 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
     if (stepper.distanceToGo() != 0)
     {
       stepper.run();
-      /*
-      stepCountAccelLookup = min(stepCountAccelLookup, 29);
-
-      //Set the stepper speed
-      stepper.setSpeed(stepperAccelTable[stepCountAccelLookup] * rotationDirection);
-
-      //Incriment the stepper speed lookup up
-      stepCountAccelLookup++;
-
-      //Incriment the total step count
-      stepCount++;
-      */
     }
     else
     {
@@ -685,9 +679,9 @@ int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEn
   int extent = 0;
   int reverseExtent = 0;
 
-  extent = (0 - currentPosition + destinationPosition) * (!isIncreasingEncoderValue?-1:1);
-  reverseExtent = (4095 - currentPosition + destinationPosition) * (isIncreasingEncoderValue?1:-1);
- 
+  extent = (0 - currentPosition + destinationPosition) * (!isIncreasingEncoderValue ? -1 : 1);
+  reverseExtent = (4095 - currentPosition + destinationPosition) * (isIncreasingEncoderValue ? 1 : -1);
+
   Serial.print("extent: ");
   Serial.println(extent);
   Serial.print("reverse extent: ");
@@ -701,32 +695,6 @@ int FindExtent(int currentPosition, int destinationPosition, bool isIncreasingEn
   {
     return reverseExtent;
   }
-}
-
-//**********************************************************************
-//  Rev Match the Gears Between shifts
-//**********************************************************************
-void RevMatch(int currentGear, int newGear)
-{
-  float revRatio = vehicle.RevMatch(currentGear, newGear, layRpm);
-
-  //Use the target RPM not the current RPM because of the throttle cut
-  targetRPM = targetRPM * revRatio;
-  int lowerBinIndex = 0;
-  int upperBinIndex = 0;
-
-  for (int i = 0; i < 24; i++)
-  {
-    if (pwmLookupByRPM[i][0] >= targetRPM)
-    {
-      lowerBinIndex = i - 1;
-      upperBinIndex = i;
-      //Linearly interpolate between upper and lower values of the lookup to determine the perfect PWM value to match the revs
-      speedControlPWM = map(targetRPM, pwmLookupByRPM[0][lowerBinIndex], pwmLookupByRPM[0][upperBinIndex], pwmLookupByRPM[1][lowerBinIndex], pwmLookupByRPM[1][upperBinIndex]);
-      break;
-    }
-  }
-  ledcWrite(pwmChannel, speedControlPWM);
 }
 
 //**********************************************************************
@@ -906,6 +874,7 @@ void initializeWifi()
   if (esp_now_init() != ESP_OK)
   {
     Serial.println("Error initializing ESP-NOW");
+    ESP.restart();
   }
 
   // Once ESPNow is successfully Init, we will register for Send CB to
@@ -914,21 +883,44 @@ void initializeWifi()
 
   // Register peer
   esp_now_peer_info_t peerInfo;
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 6;
+  peerInfo.encrypt = false;
 
-  while (esp_now_add_peer(&peerInfo) != ESP_OK)
+  // Add peer
+  esp_err_t addStatus = esp_now_add_peer(&peerInfo);
+
+  if (addStatus == ESP_OK)
   {
-
-    memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-    peerInfo.channel = 0;
-    peerInfo.encrypt = false;
-
-    // Add peer
-    if (esp_now_add_peer(&peerInfo) != ESP_OK)
-    {
-      Serial.println("Failed to add peer");
-      delay(1000);
-    }
+    // Pair success
+    Serial.println("Pair success");
   }
+  else if (addStatus == ESP_ERR_ESPNOW_NOT_INIT)
+  {
+    // How did we get so far!!
+    Serial.println("ESPNOW Not Init");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_ARG)
+  {
+    Serial.println("Add Peer - Invalid Argument");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_FULL)
+  {
+    Serial.println("Peer list full");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_NO_MEM)
+  {
+    Serial.println("Out of memory");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_EXIST)
+  {
+    Serial.println("Peer Exists");
+  }
+  else
+  {
+    Serial.println("Not sure what happened");
+  }
+
   // Register for a callback function that will be called when data is received
   esp_now_register_recv_cb(OnDataRecv);
 }
@@ -1117,6 +1109,5 @@ void Diagnostics()
 
     //Disable steppers
     EnableDisableSteppers(false);
-
   }
 }

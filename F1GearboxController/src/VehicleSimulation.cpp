@@ -1,6 +1,6 @@
 #include <VehicleSimulation.h>
 
-static const float gearRatios[] =
+const double gearRatios[] =
     {0,
          2.0,
          1.57,
@@ -11,10 +11,10 @@ static const float gearRatios[] =
          0.73};
 ;
 
- const float finalDriveCoefficent = 3.85;
- const float totalDragProduct = 3.5; //Not an actual drag coefficent, just use to simulate drag increasing with speed and acts as product of all the other factors
- const float totalMassConstant = 25;
- const float powertrainFriction = .6;
+ const double finalDriveCoefficent = 3.85;
+ const double totalDragProduct = .3; //Not an actual drag coefficent, just use to simulate drag increasing with speed and acts as product of all the other factors
+ const double totalMassConstant = 25;
+ const double powertrainFriction = .6;
  const int idleRPM = 450;
  const int revLimiter = 1200;
  const int computeInterval = 100000; //Time in microseconds between recalculating a target rpm
@@ -50,32 +50,47 @@ int VehicleSimulation::Simulate(float percentThrottle, int inputLayRPM, int curr
     unsigned long currentMicros = micros();
     unsigned long dt = currentMicros - previousSimulateMicros; //Time elapsed since the vehicle was last simulated
     int newTargetRPM = 0;
-    if (dt > computeInterval && inputLayRPM > 1 && currentGear > 0)
+    if (dt > computeInterval && inputLayRPM > 1)
     {
-        float effectiveGearRatio = gearRatios[currentGear] * finalDriveCoefficent;
+        if(currentGear > 0)
+        {
+        double effectiveGearRatio = gearRatios[currentGear] * finalDriveCoefficent;
         //final drive takes into account tire diameter
-        int vehicleSpeed = inputLayRPM / effectiveGearRatio;
+        long vehicleSpeed = inputLayRPM / effectiveGearRatio;
 
         //Effectively adding a floor to the percent throttle
-        float effectivePercentThrottle = constrain(percentThrottle, 1, 100);
+        double effectivePercentThrottle = constrain(percentThrottle, 1, 100);
 
         //Force available at the current RPM assuming full throttle
-        float totalAvailableCurrentForce = ComputeEngineForce(inputLayRPM);
+        double totalAvailableCurrentForce = ComputeEngineForce(inputLayRPM);
 
         //Current power at the wheels based on the throttle position & gear ratio
-        float currentEffectiveForce = effectivePercentThrottle * totalAvailableCurrentForce * effectiveGearRatio;
-        float totalPowerTrainFriction = powertrainFriction * inputLayRPM;
+        double currentEffectiveForce = effectivePercentThrottle * totalAvailableCurrentForce * effectiveGearRatio;
+        double totalPowerTrainFriction = powertrainFriction * inputLayRPM;
 
+        Serial.print("currentEffectiveForce ");
+        Serial.println(currentEffectiveForce);
+        Serial.print("totalPowerTrainFriction ");
+        Serial.println(totalPowerTrainFriction);
+        
         //A = F/M Thus engine powe r/some mass constant
         // Force of engine at the wheels is dependent on gear ratio
         //Net Decel being experienced based on speed (product of all drag area and coeficients) * vehicleSpeed^2
-        float netAcceleration = .0003 * ((currentEffectiveForce / totalMassConstant) - totalPowerTrainFriction - (totalDragProduct * pow(vehicleSpeed, 2)));
+        double netAcceleration = .0003 * ((currentEffectiveForce / totalMassConstant) - totalPowerTrainFriction - (totalDragProduct * pow(vehicleSpeed, 2.4)));
+        Serial.print("Net Acceleration: ");
+        Serial.println(netAcceleration);
 
         //New target rpm is based on current rpm + delta T * netacceleration, based on V = V0 + AdT
         newTargetRPM = inputLayRPM + dt * netAcceleration;
 
         previousSimulateMicros = currentMicros;
         // Return newly Calculated target RPM
+        }
+        else
+        {
+            newTargetRPM = map(percentThrottle, 0, 100, idleRPM, revLimiter);
+        }
+        
     }
 
     //Constrain RPM between idle and rev limiter
@@ -111,7 +126,7 @@ float VehicleSimulation::ThrottleCut()
     return 0.9;
 }
 
-int RevMatch(int currentGear, int newGear, int layRPM)
+int VehicleSimulation::RevMatch(int currentGear, int newGear, int layRPM)
 {
     //Account for neutral which up or down has no rev match
     if (currentGear == 0 || newGear == 0)

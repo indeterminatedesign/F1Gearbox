@@ -1,27 +1,35 @@
 {
-	"folders": [
-		{
-			"name": "F1SteeringWheelRemote",
-			"path": "..\\..\\F1SteeringWheelRemote"
-		},
-		{
-			"name": "F1GearboxController",
-			"path": ".."
-		},
-		{
-			"name": "GearboxDiag",
-			"path": "..\\..\\..\\GearboxDiag"
-		},
-		{
-			"name": "PID AutoTune",
-			"path": "..\\..\\..\\PID AutoTune"
-		},
-		{
-			"name": "AS5600 Test",
-			"path": "..\\..\\..\\AS5600 Test"
-		}
-	],
-	"settings": {
-		"idf.portWin": "COM13"
-	}
+  "folders": [
+    {
+      "name": "F1SteeringWheelRemote",
+      "path": "..\\..\\F1SteeringWheelRemote"
+    },
+    {
+      "name": "F1GearboxController",
+      "path": ".."
+    },
+    {
+      "name": "GearboxDiag",
+      "path": "..\\..\\..\\GearboxDiag"
+    },
+    {
+      "name": "PID AutoTune",
+      "path": "..\\..\\..\\PID AutoTune"
+    },
+    {
+      "name": "AS5600 Test",
+      "path": "..\\..\\..\\AS5600 Test"
+    },
+    {
+      "name": "F1 Accelerator Pedal",
+      "path": "..\\..\\..\\F1 Accelerator Pedal"
+    },
+    {
+      "name": "Marlin-2.0.x-SKR-Mini-E3-V1.2",
+      "path": "..\\..\\..\\..\\..\\..\\Desktop\\BIGTREETECH-SKR-mini-E3-master\\firmware\\V1.2\\Marlin-2.0.x-SKR-Mini-E3-V1.2"
+    }
+  ],
+  "settings": {
+    "idf.portWin": "COM13"
+  }
 }

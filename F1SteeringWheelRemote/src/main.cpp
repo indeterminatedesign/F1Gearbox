@@ -71,8 +71,8 @@ int ledArray[12] =
         b3pin,
         b4pin};
 //Shift Indicator
-const int maxRPM = 1200;
-const int startRPM = 800;
+const int maxRPM = 1000;   // 1200;
+const int startRPM = 600; // 800;
 
 //SevSeg sevseg;
 SX1509 sevsegLeft;
@@ -121,8 +121,8 @@ String success;
 //Define variables to control how often data is sent or incoming data processed
 unsigned long previousUpdateGearboxDataMicros = 0;
 unsigned long previousProcessIncomingGearboxMicros = 0;
-const long updateGearboxDataInterval = 10000;
-const long processIncomingGearboxDataInterval = 10000;
+const long updateGearboxDataInterval = 25000;
+const long processIncomingGearboxDataInterval = 50000;
 
 void Diagnostics();
 void UpdateShiftIndicatorBasedonRPM(int currentRPM);
@@ -141,16 +141,14 @@ void ButtonIndicator();
 //**********************************************************************
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-  Serial.print("\r\nLast Packet Send Status:\t");
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+  Serial.print("Last Packet Sent to: ");
+  Serial.println(macStr);
+  Serial.print("Last Packet Send Status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  if (status == 0)
-  {
-    success = "Delivery Success :)";
-  }
-  else
-  {
-    success = "Delivery Fail :(";
-  }
+
 }
 
 //**********************************************************************
@@ -159,14 +157,14 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
   memcpy(&incomingMessage, incomingData, sizeof(incomingMessage));
-  // Serial.print("Bytes received: ");
-  //Serial.println(len);
+   Serial.print("Bytes received: ");
+  Serial.println(len);
   incomingCurrentGear = incomingMessage.currentGear;
   incomingMainRPM = incomingMessage.rpmMain;
   incomingLayRPM = incomingMessage.rpmLay;
 
-  //Serial.println(incomingLayRPM);
-  //Serial.println(incomingCurrentGear);
+  Serial.println(incomingLayRPM);
+  Serial.println(incomingCurrentGear);
 }
 
 //**********************************************************************
@@ -304,12 +302,34 @@ void SendGearboxData(int action)
 
   if (result == ESP_OK)
   {
-    Serial.println("Sent with success");
+    Serial.println("Success");
+  }
+  else if (result == ESP_ERR_ESPNOW_NOT_INIT)
+  {
+    // How did we get so far!!
+    Serial.println("ESPNOW not Init.");
+  }
+  else if (result == ESP_ERR_ESPNOW_ARG)
+  {
+    Serial.println("Invalid Argument");
+  }
+  else if (result == ESP_ERR_ESPNOW_INTERNAL)
+  {
+    Serial.println("Internal Error");
+  }
+  else if (result == ESP_ERR_ESPNOW_NO_MEM)
+  {
+    Serial.println("ESP_ERR_ESPNOW_NO_MEM");
+  }
+  else if (result == ESP_ERR_ESPNOW_NOT_FOUND)
+  {
+    Serial.println("Peer not found.");
   }
   else
   {
-    Serial.println("Error sending the data");
+    Serial.println("Not sure what happened");
   }
+  delay(10);
 }
 
 //**********************************************************************
@@ -517,7 +537,7 @@ void initializeWifi()
   if (esp_now_init() != ESP_OK)
   {
     Serial.println("Error initializing ESP-NOW");
-    return;
+    ESP.restart();
   }
 
   // Once ESPNow is successfully Init, we will register for Send CB to
@@ -527,15 +547,43 @@ void initializeWifi()
   // Register peer
   esp_now_peer_info_t peerInfo;
   memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;
+  peerInfo.channel = 6;
   peerInfo.encrypt = false;
 
   // Add peer
-  if (esp_now_add_peer(&peerInfo) != ESP_OK)
+  esp_err_t addStatus = esp_now_add_peer(&peerInfo);
+
+  if (addStatus == ESP_OK)
   {
-    Serial.println("Failed to add peer");
-    return;
+    // Pair success
+    Serial.println("Pair success");
   }
+  else if (addStatus == ESP_ERR_ESPNOW_NOT_INIT)
+  {
+    // How did we get so far!!
+    Serial.println("ESPNOW Not Init");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_ARG)
+  {
+    Serial.println("Add Peer - Invalid Argument");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_FULL)
+  {
+    Serial.println("Peer list full");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_NO_MEM)
+  {
+    Serial.println("Out of memory");
+  }
+  else if (addStatus == ESP_ERR_ESPNOW_EXIST)
+  {
+    Serial.println("Peer Exists");
+  }
+  else
+  {
+    Serial.println("Not sure what happened");
+  }
+
   // Register for a callback function that will be called when data is received
   esp_now_register_recv_cb(OnDataRecv);
 }
