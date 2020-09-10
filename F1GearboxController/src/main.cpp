@@ -7,7 +7,6 @@
 #include <esp_now.h>
 #include <VehicleSimulation.h>
 #include <AS5600.h>
-//#include <C:\Users\MereBrianPC\.platformio\packages\framework-arduinoespressif32\libraries\Wire\src\Wire.h>
 
 //Define all the pins
 const int stepperLPin = 23;      //Step pin
@@ -20,8 +19,8 @@ const int escPin = 12;           //Speed controller pin
 const int mainRPMPin = 5;        //Pin for interupt of the mainshaft photo sensor
 const int layRPMPin = 18;        //Pin for interupt of the layshaft photo sensor
 const int acceleratorPin = 36;   //Pin for input from a 10k pot representing accelerator
-const int sda2Pin = 33;
-const int scl2Pin = 32;
+const int sda2Pin = 33;          //2nd I2C Bus
+const int scl2Pin = 32;          //2nd I2C Bus
 
 // Initialiize the Stepper motors
 AccelStepper stepperR(1, stepperRPin, stepperRDirPin);
@@ -380,6 +379,7 @@ void ProcessIncomingRemoteData()
   if (incomingPercentThrottle > 0)
   {
     percentThrottle = incomingPercentThrottle;
+    return;
   }
 
   /*
@@ -469,9 +469,11 @@ int ShiftGears(int newGear, int currentGear)
   Serial.print("Destination Value L Barrel ");
   Serial.println(gearSettings[newGear][LEFT]);
 */
-  int stepperRRotationDirection =-1;
-  int stepperLRotationDirection =-1;
 
+  int shiftDirection = (newGear - currentGear) / abs(newGear - currentGear);
+  int stepperRRotationDirection = -1 * shiftDirection;
+  int stepperLRotationDirection = 1 * shiftDirection;
+ 
   unsigned long timer = micros();
 
   //Enable steppers
@@ -480,50 +482,50 @@ int ShiftGears(int newGear, int currentGear)
   //Cut Throttle via to release sliders from dogs
   if (engineRunning)
   {
-    //speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
-    //ledcWrite(pwmChannel, speedControlPWM);
+    speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
+    ledcWrite(pwmChannel, speedControlPWM);
   }
   //Determine which barrel to move first
-   if (gearSettings[newGear][2])
+  if (gearSettings[newGear][2])
+  {
+    Serial.println("2$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
+    //Right then left barrels
+    if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false))
     {
-         Serial.println("2$$$$$$$$$$$ RIGHT THEN LEFT $$$$$$$$$$$$$$");
-        //Right then left barrels
-        if (moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], false))
-        {
-          //Rev Match code goes here
-          vehicle.RevMatch(currentGear, newGear, layRpm);
-          shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true);
-          if (!shiftComplete)
-          {
-            engineRunning = false;
-            Serial.println("Error with Left Barrel");
-          }
-        }
-        else
-        {
-          Serial.println("Error with Right Barrel");
-        }
-    }
-     else
-    { 
-      //Left then right barrels
-      Serial.println("1$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
-      if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false))
+      //Rev Match code goes here
+      vehicle.RevMatch(currentGear, newGear, layRpm);
+      shiftComplete = moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], true);
+      if (!shiftComplete)
       {
-        //Rev Match code goes here
-        vehicle.RevMatch(currentGear, newGear, layRpm);
-        shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true);
-        if (!shiftComplete)
-        {
-          Serial.println("Error with Right Barrel");
-        }
-      }
-      else
-      {
+        engineRunning = false;
         Serial.println("Error with Left Barrel");
       }
     }
-  
+    else
+    {
+      Serial.println("Error with Right Barrel");
+    }
+  }
+  else
+  {
+    //Left then right barrels
+    Serial.println("1$$$$$$$$$$$ LEFT THEN RIGHT $$$$$$$$$$$$$$");
+    if (moveBarrel(stepperL, stepperLRotationDirection, leftEncoder, gearSettings[newGear][LEFT], false))
+    {
+      //Rev Match code goes here
+      vehicle.RevMatch(currentGear, newGear, layRpm);
+      shiftComplete = moveBarrel(stepperR, stepperRRotationDirection, rightEncoder, gearSettings[newGear][RIGHT], true);
+      if (!shiftComplete)
+      {
+        Serial.println("Error with Right Barrel");
+      }
+    }
+    else
+    {
+      Serial.println("Error with Left Barrel");
+    }
+  }
+
   long totalTime = micros() - timer;
 
   //Disable steppers
@@ -556,7 +558,6 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
   int extent = FindExtent(currentPosition, destinationPosition);
   //Set the reached destination boolean, barrel maybe already in destination position
   bool reachedDestination = abs(extent) <= gearValueThreshold;
-
 
   Serial.print("Initial Position: ");
   Serial.println(currentPosition);
@@ -599,7 +600,6 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
     }
   }
 
-
   Serial.println("**************Barrel Move Complete*****************");
   Serial.print("Final Extent: ");
   Serial.println(extent);
@@ -608,13 +608,6 @@ bool moveBarrel(AccelStepper stepper, int rotationDirection, AS5600 encoder, int
   Serial.print("Step Count: ");
   Serial.println(stepCount);
 
-  /*
-  Serial.println("*************Move Barrel Complete******************");
-  Serial.print("Destination Pot Value: ");
-  Serial.println(destinationPotValue);
-  Serial.print("Filtered Pot Value: ");
-  Serial.println(filteredValue);
-  */
   return reachedDestination;
 }
 //**********************************************************************
@@ -625,9 +618,9 @@ int FindExtent(int currentPosition, int destinationPosition)
 {
   //Calculate raw distance between two points, mod 360 to remove multiple rotations, then determine the shortest angle
   int raw_dist = (destinationPosition - currentPosition);
-  int mod_dist = raw_dist % 4096;
+  int mod_dist = abs(raw_dist) % 4096;
   int short_dist = mod_dist;
-  
+
   if (mod_dist >= 2048)
   {
     short_dist = 4096 - mod_dist;
