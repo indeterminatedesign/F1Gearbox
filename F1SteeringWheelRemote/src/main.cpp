@@ -90,6 +90,7 @@ int incomingCurrentGear;
 //Must match the receiver structure
 typedef struct struct_message
 {
+  int id;
   int rpmMain;
   int rpmLay;
   float percentThrottle;
@@ -295,7 +296,7 @@ void SendGearboxData(int action)
   Serial.print("Outbound Action: ");
   Serial.println(action);
   message.action = action;
-  message.percentThrottle = percentThrottle;
+  message.id = 0;
 
   // Send message via ESP-NOW
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&message, sizeof(message));

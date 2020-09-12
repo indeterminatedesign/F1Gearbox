@@ -45,10 +45,6 @@ const int CCW = -1;
 #define LEFT 0
 #define RIGHT 1
 
-//Min/Max pot value for accelerator pedal
-const int minThrottle = 3195;
-const int maxThrottle = 1206;
-
 //PWM Speed Control Variables
 const int freq = 20000;
 const int resolution = 8;
@@ -74,8 +70,8 @@ int speedControlPWM = 0;
 float previousError = 0;
 float integral = 0;
 unsigned long previousMotorSpeedControlMicros = 0;
-const float Kp = 0.6f;
-const float Ki = 0.15f; //0.15
+const float Kp = 0.5f; //0.6
+const float Ki = 0.1f; //0.15
 const float Kd = 0.02f; //.15
 unsigned long previousMicros = 0;
 bool engineRunning = true;
@@ -92,7 +88,6 @@ uint8_t broadcastAddress[] = {0x3C, 0x71, 0xBF, 0x64, 0x55, 0x04};
 
 // Define variables to store incoming readings
 float incomingPercentThrottle;
-int incomingAction;
 int incomingCurrentGear; //Used only for learning purposes
 
 //Define variables to control how often data is sent or incoming data processed
@@ -108,6 +103,7 @@ String success;
 //Must match the receiver structure
 typedef struct struct_message
 {
+  int id;
   int rpmMain;
   int rpmLay;
   float percentThrottle;
@@ -130,6 +126,13 @@ struct_message message;
 
 // Create a struct_message to hold incoming sensor readings
 struct_message incomingMessage;
+
+// Create a structure to hold the readings from each board
+struct_message board1;
+struct_message board2;
+
+// Create an array with all the structures
+struct_message boardsStruct[2] = {board1, board2};
 
 //Gear and pot values
 const int gearValueThreshold = 40; //Threshold range for pot values to confirm shift occurred
@@ -201,22 +204,19 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
   //Serial.println(len);
 
   //Flag that an action has occured and must be processed, stop loading data from remote until action has been handled
-  if (!actionFlag)
+  if (incomingMessage.id == 0 && !actionFlag)
   {
-    if (incomingMessage.percentThrottle > 0)
-    {
-      incomingPercentThrottle = incomingMessage.percentThrottle;
-    }
-    else
-    {
       //incomingCurrentGear = incomingMessage.currentGear;
-      incomingAction = incomingMessage.action;
-    }
+      boardsStruct[incomingMessage.id].action = incomingMessage.action;
 
-    if (incomingAction != NoAction)
-    {
-      actionFlag = true;
+      if (boardsStruct[incomingMessage.id].action != NoAction)
+      {
+        actionFlag = true;
     }
+  }
+  else if (incomingMessage.id == 1)
+  {
+      boardsStruct[incomingMessage.id].percentThrottle = incomingMessage.percentThrottle;
   }
 }
 
@@ -314,6 +314,7 @@ void SendRemoteData()
     message.currentGear = currentGear;
     message.rpmMain = mainRpmFiltered;
     message.rpmLay = layRpmFiltered;
+    message.id = 2;
 
     // Send message via ESP-NOW
     esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *)&message, sizeof(message));
@@ -374,40 +375,28 @@ void ProcessIncomingRemoteData()
   Serial.println("INCOMING VALUES");
   Serial.print("Percent Throttle");
   Serial.println(incomingPercentThrottle);
-
-  percentThrottle = 0;
-  if (incomingPercentThrottle > 0)
-  {
-    percentThrottle = incomingPercentThrottle;
-    return;
-  }
-
   /*
   Serial.print("Incoming Action: ");
   Serial.println(incomingAction);
   */
+  percentThrottle = boardsStruct[1].percentThrottle;
+
   if (actionFlag)
   {
-    switch (incomingAction)
+    switch (boardsStruct[0].action)
     {
     case NoAction:
-      //############################################
-      //percentThrottle = incomingPercentThrottle;
-      //Place code here to process throttle and calculate target RPM
-      //Call Vehicle Simulation
       break;
     case Upshift:
       currentGear = ShiftGears(currentGear + 1, currentGear);
-      //TODO Lower revs of motor based on new gear ratio
       break;
     case Downshift:
       currentGear = ShiftGears(currentGear - 1, currentGear);
-      //TODO: Up revs of motor based on new gear ratio
       break;
     case StoreValues:
-      //Call learn gears to store the current gear's shift drum positions
+      //Call learn gears to store the neutral position offset of each shift drum
       LearnGear();
-      Serial.println("Start Learn Gear");
+      Serial.println("Learn Gear");
       break;
     case StartStopEngine:
       //If the engine isn't running start it up, otherwise turn it off
@@ -418,8 +407,7 @@ void ProcessIncomingRemoteData()
       Serial.println("Error");
       break;
     }
-    incomingAction = NoAction;
-    incomingMessage.action = NoAction;
+    boardsStruct[0].action = NoAction;
     actionFlag = false;
   }
 }
@@ -479,7 +467,7 @@ int ShiftGears(int newGear, int currentGear)
   //Enable steppers
   EnableDisableSteppers(true);
 
-  //Cut Throttle via to release sliders from dogs
+  //Small Throttle Cut to release sliders from dogs
   if (engineRunning)
   {
     speedControlPWM = speedControlPWM * vehicle.ThrottleCut();
@@ -737,16 +725,12 @@ bool ComputeRPMOnInterval(unsigned long interval)
     mainRpmFiltered = FilterValue(mainRpm, mainRpmFiltered, 0.9f);
     layRpmFiltered = FilterValue(layRpm, layRpmFiltered, 0.9f);
 
-    //Serial.println("MainRPM,LayRPM ");
+    /*
+    Serial.println("MainRPM,LayRPM ");
     Serial.print(mainRpmFiltered);
     Serial.print(",");
     Serial.println(layRpmFiltered);
-
-    //Serial.print("Main RPM: ");
-    //Serial.println(mainRpm);
-
-    // Serial.print("Lay RPM: ");
-    // Serial.println(layRpm);
+    */
 
     rpmUpdatePreviousMicros = micros();
     rpmUpdated = true;
@@ -755,7 +739,7 @@ bool ComputeRPMOnInterval(unsigned long interval)
 }
 
 //**********************************************************************
-//  CountPulse from Photosensors
+//  CountPulses from Photosensors
 //**********************************************************************
 bool CountPulses(int pin, bool &bounceState, bool &previousSensorState, unsigned long &previousMicros, unsigned long &pulseCount)
 {
@@ -863,10 +847,6 @@ void initializeWifi()
 //**********************************************************************
 void LoadGearSettings()
 {
-  //Check to see if any settings have been stored to eeprom yet.  If no, then don't try to load from eeprom.
-  //int val = EEPROM.read(0);
-  //if (val != 255)
-  //{
   int eeAddress = 0;
   //Read gear settings to eeprom
   for (int i = 0; i <= 7; i++)
@@ -881,7 +861,6 @@ void LoadGearSettings()
     Serial.print("Right Values");
     Serial.println(gearSettings[i][RIGHT]);
   }
-  //}
 }
 
 //**********************************************************************
