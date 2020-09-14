@@ -2,34 +2,34 @@
 
 const double gearRatios[] =
     {0,
-         2.0,
-         1.57,
-         1.25,
-         1.0,
-         0.93,
-         0.86,
-         0.73};
+     2.0,
+     1.57,
+     1.25,
+     1.0,
+     0.93,
+     0.86,
+     0.73};
 ;
 
- const double finalDriveCoefficent = 3.85;
- const double totalDragProduct = .3; //Not an actual drag coefficent, just use to simulate drag increasing with speed and acts as product of all the other factors
- const double totalMassConstant = 25;
- const double powertrainFriction = .6;
- const int idleRPM = 450;
- const int revLimiter = 1200;
- const int computeInterval = 100000; //Time in microseconds between recalculating a target rpm
+const double finalDriveCoefficent = 3.85;
+const double totalDragProduct = .3; //Not an actual drag coefficent, just use to simulate drag increasing with speed and acts as product of all the other factors
+const double totalMassConstant = 25;
+const double powertrainFriction = 10;
+const int idleRPM = 450;
+const int revLimiter = 1200;
+const int computeInterval = 100000; //Time in microseconds between recalculating a target rpm
 
- const int enginePowerBins[15][2] = {
+const int enginePowerBins[15][2] = {
     {0, 0},
     {100, 0},
     {200, 0},
-    {300, 0},
-    {400, 0},
-    {500, 35},
-    {600, 250},
+    {300, 100},
+    {400, 250},
+    {500, 300},
+    {600, 350},
     {700, 575},
     {800, 625},
-    {900, 725},
+    {900, 775},
     {1000, 850},
     {1100, 930},
     {1200, 935},
@@ -38,6 +38,7 @@ const double gearRatios[] =
 
 unsigned long previousSimulateMicros = 0;
 int previousGear;
+int newTargetRPM = idleRPM;
 
 VehicleSimulation::~VehicleSimulation()
 {
@@ -49,51 +50,50 @@ int VehicleSimulation::Simulate(float percentThrottle, int inputLayRPM, int curr
 
     unsigned long currentMicros = micros();
     unsigned long dt = currentMicros - previousSimulateMicros; //Time elapsed since the vehicle was last simulated
-    int newTargetRPM = 0;
+
     if (dt > computeInterval && inputLayRPM > 1)
     {
-        if(currentGear > 0)
+        if (currentGear > 0)
         {
-        double effectiveGearRatio = gearRatios[currentGear] * finalDriveCoefficent;
-        //final drive takes into account tire diameter
-        long vehicleSpeed = inputLayRPM / effectiveGearRatio;
+            double effectiveGearRatio = gearRatios[currentGear] * finalDriveCoefficent;
+            //final drive takes into account tire diameter
+            long vehicleSpeed = inputLayRPM / effectiveGearRatio;
 
-        //Effectively adding a floor to the percent throttle
-        double effectivePercentThrottle = constrain(percentThrottle, 1, 100);
+            //Effectively adding a floor to the percent throttle
+            double effectivePercentThrottle = constrain(percentThrottle, 1, 100);
 
-        //Force available at the current RPM assuming full throttle
-        double totalAvailableCurrentForce = ComputeEngineForce(inputLayRPM);
+            //Force available at the current RPM assuming full throttle
+            double totalAvailableCurrentForce = ComputeEngineForce(inputLayRPM);
 
-        //Current power at the wheels based on the throttle position & gear ratio
-        double currentEffectiveForce = effectivePercentThrottle * totalAvailableCurrentForce * effectiveGearRatio;
-        double totalPowerTrainFriction = powertrainFriction * inputLayRPM;
+            //Current power at the wheels based on the throttle position & gear ratio
+            double currentEffectiveForce = 60 * effectivePercentThrottle * totalAvailableCurrentForce * effectiveGearRatio;
+            double totalPowerTrainFriction = powertrainFriction * inputLayRPM;
 
-        Serial.print("currentEffectiveForce ");
-        Serial.println(currentEffectiveForce);
-        Serial.print("totalPowerTrainFriction ");
-        Serial.println(totalPowerTrainFriction);
-        
-        //A = F/M Thus engine powe r/some mass constant
-        // Force of engine at the wheels is dependent on gear ratio
-        //Net Decel being experienced based on speed (product of all drag area and coeficients) * vehicleSpeed^2
-        double netAcceleration = .0003 * ((currentEffectiveForce / totalMassConstant) - totalPowerTrainFriction - (totalDragProduct * pow(vehicleSpeed, 2.4)));
-        Serial.print("Net Acceleration: ");
-        Serial.println(netAcceleration);
+            Serial.print("currentEffectiveForce ");
+            Serial.println(currentEffectiveForce);
+            Serial.print("totalPowerTrainFriction ");
+            Serial.println(totalPowerTrainFriction);
 
-        //New target rpm is based on current rpm + delta T * netacceleration, based on V = V0 + AdT
-        newTargetRPM = inputLayRPM + dt * netAcceleration;
+            //A = F/M Thus engine power/some mass constant
+            // Force of engine at the wheels is dependent on gear ratio
+            //Net Decel being experienced based on speed (product of all drag area and coeficients) * vehicleSpeed^2
+            double netAcceleration = .0003 * ((currentEffectiveForce / totalMassConstant) - totalPowerTrainFriction - (totalDragProduct * pow(vehicleSpeed, 2.5)));
+            Serial.print("Net Acceleration: ");
+            Serial.println(netAcceleration);
 
-        previousSimulateMicros = currentMicros;
-        // Return newly Calculated target RPM
+
+            //New target rpm is based on current rpm + delta T * netacceleration, based on V = V0 + AdT
+            newTargetRPM = newTargetRPM + dt / 1000000.00 * netAcceleration;
+
+            previousSimulateMicros = currentMicros;
+            // Return newly Calculated target RPM
         }
         else
         {
             newTargetRPM = map(percentThrottle, 0, 100, idleRPM, revLimiter);
         }
-        
+        //Constrain RPM between idle and rev limiter
     }
-
-    //Constrain RPM between idle and rev limiter
     newTargetRPM = constrain(newTargetRPM, idleRPM, revLimiter);
 
     previousGear = currentGear;
@@ -117,7 +117,7 @@ float VehicleSimulation::ComputeEngineForce(int layshaftRPM)
     }
 
     //Use map function to linear interpolate the power between the two bins
-    return map(layshaftRPM, enginePowerBins[lowerBinIndex][0], enginePowerBins[upperBinIndex][0], enginePowerBins[lowerBinIndex][ 1], enginePowerBins[upperBinIndex][ 1]);
+    return map(layshaftRPM, enginePowerBins[lowerBinIndex][0], enginePowerBins[upperBinIndex][0], enginePowerBins[lowerBinIndex][1], enginePowerBins[upperBinIndex][1]);
 }
 
 //Cut Throttle based on PWM value
@@ -135,6 +135,7 @@ int VehicleSimulation::RevMatch(int currentGear, int newGear, int layRPM)
     }
     else
     {
-        return layRPM * gearRatios[newGear] / gearRatios[currentGear];
+        newTargetRPM = layRPM * gearRatios[newGear] / gearRatios[currentGear];
+        return newTargetRPM;
     }
 }

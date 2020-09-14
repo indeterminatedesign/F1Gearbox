@@ -71,8 +71,8 @@ int ledArray[12] =
         b3pin,
         b4pin};
 //Shift Indicator
-const int maxRPM = 1000;   // 1200;
-const int startRPM = 600; // 800;
+const int maxRPM = 900;   // 1200;
+const int startRPM = 800; // 800;
 
 //SevSeg sevseg;
 SX1509 sevsegLeft;
@@ -217,22 +217,6 @@ void setup()
 void loop()
 {
   //Poll the Buttons
-  //Button 1
-  if (PollButton(button1Pin, button1BounceState, button1PreviousState, previousButton1Micros))
-  {
-    Serial.println("Button 1 Pressed");
-    ButtonIndicator();
-    LearningMode();
-  }
-
-  //Button 2
-  if (PollButton(button2Pin, button2BounceState, button2PreviousState, previousButton2Micros))
-  {
-    ButtonIndicator();
-    Serial.println("Button 2 Pressed");
-    SendGearboxData(StartStopEngine);
-  }
-
   //Up Paddle
   if (PollButton(upPaddlePin, upPaddleBounceState, upPaddlePreviousState, previousUpPaddleMicros))
   {
@@ -242,11 +226,28 @@ void loop()
   }
 
   //Down Paddle
-  if (PollButton(downPaddlePin, downPaddleBounceState, downPaddlePreviousState, previousDownPaddleMicros))
+  //Moved Button1 to downshift because of issue with bad pcb
+  if (PollButton(button1Pin, downPaddleBounceState, downPaddlePreviousState, previousDownPaddleMicros))
   {
     Serial.println("*****DownShift*****");
     incomingCurrentGear--;
     SendGearboxData(Downshift);
+  }
+  /*
+  //Button 1
+  if (PollButton(button1Pin, button1BounceState, button1PreviousState, previousButton1Micros))
+  {
+    Serial.println("Button 1 Pressed");
+    ButtonIndicator();
+    LearningMode();
+  }
+*/
+  //Button 2
+  if (PollButton(button2Pin, button2BounceState, button2PreviousState, previousButton2Micros))
+  {
+    ButtonIndicator();
+    Serial.println("Button 2 Pressed");
+    SendGearboxData(StartStopEngine);
   }
 
   ProcessIncomingGearboxData();

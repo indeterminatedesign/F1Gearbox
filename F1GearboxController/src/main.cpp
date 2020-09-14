@@ -76,8 +76,8 @@ const float Kd = 0.02f; //.15
 unsigned long previousMicros = 0;
 bool engineRunning = true;
 
-const int rpmDebounceInterval = 100;
-const long rpmUpdateInterval = 100000;
+const int rpmDebounceInterval = 50;
+const long rpmUpdateInterval = 50000;
 unsigned long rpmUpdatePreviousMicros = 0;
 int targetRPM = 0;
 float percentThrottle = 0;
@@ -292,7 +292,7 @@ void loop()
   {
     if (engineRunning)
     {
-      targetRPM = vehicle.Simulate(percentThrottle, layRpmFiltered, currentGear);
+      targetRPM = vehicle.Simulate(boardsStruct[1].percentThrottle, layRpmFiltered, currentGear);
       Serial.print("New Target RPM: ");
       Serial.println(targetRPM);
     }
@@ -374,7 +374,7 @@ void ProcessIncomingRemoteData()
 
   Serial.println("INCOMING VALUES");
   Serial.print("Percent Throttle");
-  Serial.println(incomingPercentThrottle);
+  Serial.println(boardsStruct[1].percentThrottle);
   /*
   Serial.print("Incoming Action: ");
   Serial.println(incomingAction);
@@ -678,7 +678,7 @@ void ControlMotorSpeed(int rpmTarget)
 
     speedControlPWM = Kp * error + Ki * integral + Kd * derivative;
 
-    speedControlPWM = constrain(speedControlPWM, 30, 230);
+    speedControlPWM = constrain(speedControlPWM, 30, 255);
     /*
     Serial.print("Error ");
     Serial.println(error);
